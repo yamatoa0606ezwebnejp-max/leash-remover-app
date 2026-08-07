@@ -1,38 +1,56 @@
-[README.md](https://github.com/user-attachments/files/30822889/README.md)
-# LeashOff
+# Welcome to your Expo app 👋
 
-> Remove the leash. Keep the dog.
+This is an [Expo](https://expo.dev) project created with [`create-expo-app`](https://www.npmjs.com/package/create-expo-app).
 
-## What it does
+## Get started
 
-LeashOff removes leashes — and the hand holding them — from dog walking photos, then exports a print-ready image. No manual tracing, no touch-ups, no losing the shot to a strap across the frame.
+1. Install dependencies
 
-## Who it's for
+   ```bash
+   npm install
+   ```
 
-For people who want to keep, frame, or share a single photo, not just log a walk:
+2. Start the app
 
-- Owners building photo books or calendars
-- Pet accounts on social media
-- Rescue and foster organizations preparing adoption photos
-- Pet photographers
+   ```bash
+   npx expo start
+   ```
 
-## The problem
+In the output, you'll find options to open the app in a
 
-Walk photos often have great framing and a great expression — ruined by a leash and a hand in the shot. Existing tools don't quite solve it:
+- [development build](https://docs.expo.dev/develop/development-builds/introduction/)
+- [Android emulator](https://docs.expo.dev/workflow/android-studio-emulator/)
+- [iOS simulator](https://docs.expo.dev/workflow/ios-simulator/)
+- [Expo Go](https://expo.dev/go), a limited sandbox for trying out app development with Expo
 
-- **Generic AI photo editors** (e.g. Google Photos Magic Eraser) don't know what *not* to touch — bandanas, collars, and patterns get erased along with the leash, and the dog itself can shift subtly.
-- **Photoshop/Lightroom** can do it, but cloning out a long, thin, curved leash by hand is slow, tedious work.
-- **Existing specialized apps** require tracing the leash with a finger — the worst possible input method for a thin, long, curved shape.
-- **Web-based tools** need a computer, so there's no fixing the photo on the spot, right after the walk.
+You can start developing by editing the files inside the **app** directory. This project uses [file-based routing](https://docs.expo.dev/router/introduction).
 
-## What makes it different
+## Get a fresh project
 
-**1. No tracing.** The leash is thin, long, and curved — exactly the shape a finger is worst at tracing. LeashOff detects it automatically. The only thing the user does is confirm.
+When you're ready, run:
 
-**2. The dog stays intact.** Because the model is built for one specific object — a line running from collar to hand — it knows what to leave alone: fur, coat pattern, bandana, clothing. Users can also choose to keep or remove the collar itself, something generic tools can't offer.
+```bash
+npm run reset-project
+```
 
-**3. Mobile to export, in one pass.** Removal isn't the finish line — the app exports print-ready resolution too. By the time the walk is over, there's already a frame-worthy photo.
+This command will move the starter code to the **app-example** directory and create a blank **app** directory where you can start developing.
 
-## Status
+### Other setup steps
 
-Early development — Shipaton 2026 submission project.
+- To set up ESLint for linting, run `npx expo lint`, or follow our guide on ["Using ESLint and Prettier"](https://docs.expo.dev/guides/using-eslint/)
+- If you'd like to set up unit testing, follow our guide on ["Unit Testing with Jest"](https://docs.expo.dev/develop/unit-testing/)
+- Learn more about the TypeScript setup in this template in our guide on ["Using TypeScript"](https://docs.expo.dev/guides/typescript/)
+
+## Learn more
+
+To learn more about developing your project with Expo, look at the following resources:
+
+- [Expo documentation](https://docs.expo.dev/): Learn fundamentals, or go into advanced topics with our [guides](https://docs.expo.dev/guides).
+- [Learn Expo tutorial](https://docs.expo.dev/tutorial/introduction/): Follow a step-by-step tutorial where you'll create a project that runs on Android, iOS, and the web.
+
+## Join the community
+
+Join our community of developers creating universal apps.
+
+- [Expo on GitHub](https://github.com/expo/expo): View our open source platform and contribute.
+- [Discord community](https://chat.expo.dev): Chat with Expo users and ask questions.
