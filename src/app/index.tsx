@@ -1,61 +1,67 @@
-import * as Device from 'expo-device';
-import { Platform, StyleSheet } from 'react-native';
+import * as ImagePicker from 'expo-image-picker';
+import { Redirect, useRouter } from 'expo-router';
+import { Alert, StyleSheet, Switch, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
-import { AnimatedIcon } from '@/components/animated-icon';
-import { HintRow } from '@/components/hint-row';
+import { Button } from '@/components/ui/button';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
-import { WebBadge } from '@/components/web-badge';
-import { BottomTabInset, MaxContentWidth, Spacing } from '@/constants/theme';
+import { MaxContentWidth, Spacing } from '@/constants/theme';
+import { useFlow } from '@/state/flow-context';
 
-function getDevMenuHint() {
-  if (Platform.OS === 'web') {
-    return <ThemedText type="small">use browser devtools</ThemedText>;
-  }
-  if (Device.isDevice) {
-    return (
-      <ThemedText type="small">
-        shake device or press <ThemedText type="code">m</ThemedText> in terminal
-      </ThemedText>
-    );
-  }
-  const shortcut = Platform.OS === 'android' ? 'cmd+m (or ctrl+m)' : 'cmd+d';
-  return (
-    <ThemedText type="small">
-      press <ThemedText type="code">{shortcut}</ThemedText>
-    </ThemedText>
-  );
-}
+export default function PhotoSelectScreen() {
+  const router = useRouter();
+  const { hasSeenOnboarding, pickPhoto, devForceDetectionFailure, setDevForceDetectionFailure } =
+    useFlow();
 
-export default function HomeScreen() {
+  if (!hasSeenOnboarding) {
+    return <Redirect href="/onboarding" />;
+  }
+
+  async function handlePickPhoto() {
+    const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (!permission.granted) {
+      Alert.alert('Photo access needed', 'Please allow access to your photo library in Settings.');
+      return;
+    }
+
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ['images'],
+      allowsEditing: false,
+      quality: 1,
+    });
+
+    if (result.canceled) return;
+
+    pickPhoto(result.assets[0].uri);
+    router.push('/detect');
+  }
+
   return (
     <ThemedView style={styles.container}>
       <SafeAreaView style={styles.safeArea}>
-        <ThemedView style={styles.heroSection}>
-          <AnimatedIcon />
-          <ThemedText type="title" style={styles.title}>
-            Welcome to&nbsp;Expo
+        <View style={styles.hero}>
+          <ThemedText type="title" style={styles.centerText}>
+            LeashOff
           </ThemedText>
-        </ThemedView>
+          <ThemedText themeColor="textSecondary" style={styles.centerText}>
+            Remove the leash from your walk photos{'\n'}for a clean, camera-roll-ready shot.
+          </ThemedText>
+        </View>
 
-        <ThemedText type="code" style={styles.code}>
-          get started
-        </ThemedText>
+        <View style={styles.actions}>
+          <Button title="Choose from Camera Roll" onPress={handlePickPhoto} />
+          <ThemedText type="small" themeColor="textSecondary" style={styles.centerText}>
+            Select one photo
+          </ThemedText>
+        </View>
 
-        <ThemedView type="backgroundElement" style={styles.stepContainer}>
-          <HintRow
-            title="Try editing"
-            hint={<ThemedText type="code">src/app/index.tsx</ThemedText>}
-          />
-          <HintRow title="Dev tools" hint={getDevMenuHint()} />
-          <HintRow
-            title="Fresh start"
-            hint={<ThemedText type="code">npm run reset-project</ThemedText>}
-          />
-        </ThemedView>
-
-        {Platform.OS === 'web' && <WebBadge />}
+        {__DEV__ && (
+          <ThemedView type="backgroundElement" style={styles.devPanel}>
+            <ThemedText type="small">Force detection failure (dev)</ThemedText>
+            <Switch value={devForceDetectionFailure} onValueChange={setDevForceDetectionFailure} />
+          </ThemedView>
+        )}
       </SafeAreaView>
     </ThemedView>
   );
@@ -64,35 +70,36 @@ export default function HomeScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    justifyContent: 'center',
-    flexDirection: 'row',
+    alignItems: 'center',
   },
   safeArea: {
     flex: 1,
-    paddingHorizontal: Spacing.four,
-    alignItems: 'center',
-    gap: Spacing.three,
-    paddingBottom: BottomTabInset + Spacing.three,
+    width: '100%',
     maxWidth: MaxContentWidth,
-  },
-  heroSection: {
-    alignItems: 'center',
-    justifyContent: 'center',
-    flex: 1,
     paddingHorizontal: Spacing.four,
-    gap: Spacing.four,
+    justifyContent: 'center',
+    gap: Spacing.six,
   },
-  title: {
+  hero: {
+    gap: Spacing.three,
+  },
+  centerText: {
     textAlign: 'center',
   },
-  code: {
-    textTransform: 'uppercase',
+  actions: {
+    gap: Spacing.two,
+    alignItems: 'center',
   },
-  stepContainer: {
-    gap: Spacing.three,
-    alignSelf: 'stretch',
+  devPanel: {
+    position: 'absolute',
+    bottom: Spacing.four,
+    left: Spacing.four,
+    right: Spacing.four,
+    borderRadius: Spacing.three,
+    paddingVertical: Spacing.two,
     paddingHorizontal: Spacing.three,
-    paddingVertical: Spacing.four,
-    borderRadius: Spacing.four,
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
   },
 });

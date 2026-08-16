@@ -1,6 +1,6 @@
 /**
- * Below are the colors that are used in the app. The colors are defined in the light and dark mode.
- * There are many other ways to style your app. For example, [Nativewind](https://www.nativewind.dev/), [Tamagui](https://tamagui.dev/), [unistyles](https://reactnativeunistyles.vercel.app), etc.
+ * LeashOff design tokens — a walking-trail material palette (leather / rope /
+ * brass), see screen-implementation-handoff.md section 4 for the source palette.
  */
 
 import '@/global.css';
@@ -9,18 +9,34 @@ import { Platform } from 'react-native';
 
 export const Colors = {
   light: {
-    text: '#000000',
-    background: '#ffffff',
-    backgroundElement: '#F0F0F3',
-    backgroundSelected: '#E0E1E6',
-    textSecondary: '#60646C',
+    text: '#211F1B',
+    textSecondary: '#6B6355',
+    background: '#E8E1D3',
+    backgroundElement: '#F1ECE1',
+    backgroundSelected: '#DCD2BC',
+    primary: '#2B3A2E',
+    primaryDark: '#1E2921',
+    onPrimary: '#F1ECE1',
+    accent: '#B08D57',
+    accentLight: '#C7A876',
+    leather: '#8B5E3C',
+    border: '#D6CBB2',
+    danger: '#8B4A3C',
   },
   dark: {
-    text: '#ffffff',
-    background: '#000000',
-    backgroundElement: '#212225',
-    backgroundSelected: '#2E3135',
-    textSecondary: '#B0B4BA',
+    text: '#F1ECE1',
+    textSecondary: '#B8AE98',
+    background: '#1E2921',
+    backgroundElement: '#26332A',
+    backgroundSelected: '#324035',
+    primary: '#C7A876',
+    primaryDark: '#B08D57',
+    onPrimary: '#1E2921',
+    accent: '#B08D57',
+    accentLight: '#C7A876',
+    leather: '#B98455',
+    border: '#3A473C',
+    danger: '#C97B65',
   },
 } as const;
 
@@ -61,5 +77,11 @@ export const Spacing = {
   six: 64,
 } as const;
 
-export const BottomTabInset = Platform.select({ ios: 50, android: 80 }) ?? 0;
+export const Radius = {
+  small: 8,
+  medium: 14,
+  large: 24,
+  pill: 999,
+} as const;
+
 export const MaxContentWidth = 800;
