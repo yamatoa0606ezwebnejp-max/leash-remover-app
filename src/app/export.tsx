@@ -27,8 +27,8 @@ export default function ExportScreen() {
     Alert.alert('Exported', 'Your standard export (free) is complete.');
   }
 
-  function handlePrintExport() {
-    const success = consumeCredit();
+  async function handlePrintExport() {
+    const success = await consumeCredit();
     if (!success) {
       router.push('/purchase');
       return;

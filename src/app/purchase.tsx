@@ -18,8 +18,8 @@ export default function PurchaseScreen() {
   const router = useRouter();
   const { credits, addCredits } = useFlow();
 
-  function handlePurchase(amount: number) {
-    addCredits(amount);
+  async function handlePurchase(amount: number) {
+    await addCredits(amount);
     router.back();
   }
 

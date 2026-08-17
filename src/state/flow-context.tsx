@@ -1,10 +1,23 @@
-import { createContext, useCallback, useContext, useMemo, useState, type ReactNode } from 'react';
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useState,
+  type ReactNode,
+} from 'react';
+
+import { supabase } from '@/lib/supabase';
 
 /**
  * In-memory mock state for the photo → detect → correct → remove → export
- * flow. No persistence and no real detection/removal — see
- * screen-implementation-handoff.md section 5 for what's explicitly out of
- * scope (RevenueCat, image processing API, credit persistence).
+ * flow. No real detection/removal — see screen-implementation-handoff.md
+ * section 5 for what's explicitly out of scope (RevenueCat, image
+ * processing API).
+ *
+ * Identity (appleUserId) and credits ARE persisted, via Supabase — see the
+ * signIn/consumeCredit/addCredits comments below.
  */
 
 export type Highlight = {
@@ -16,10 +29,6 @@ export type Highlight = {
   included: boolean;
 };
 
-// Granted once, on first sign-in — not on app launch — so the free credit
-// stays tied to an identity rather than a device/install. See the
-// appleUserId/signIn comment in FlowState for why this alone isn't enough.
-const STARTING_CREDITS = 1;
 const DETECTION_FAILURE_RATE = 0.15;
 const HIGHLIGHT_SIZE = { width: 0.24, height: 0.14 };
 
@@ -54,23 +63,25 @@ type FlowState = {
   // free-credit reuse via reinstall, (2) prevent loss of paid consumable
   // credits on reinstall (Apple's Restore Purchases can't recover them).
   //
-  // SCOPE GAP: this is entry-point-only. appleUserId lives in memory like
-  // the rest of this mock state, so it resets on every app restart, and
-  // signIn() below can only tell if an id is new to *this* in-memory
-  // session — not whether the real person has ever signed in before. Until
-  // the id is persisted and checked server-side (separate task, alongside
-  // RevenueCat logIn()), goals (1) and (2) are NOT achieved: closing and
-  // reopening the app and signing in again with the same Apple ID re-grants
-  // the free credit. That's not merely "no better than before" — before,
-  // abuse required an uninstall; now it only requires a restart.
+  // Identity + credits are persisted via Supabase (session in AsyncStorage,
+  // balance in Postgres — see supabase/schema.sql), not local state, so
+  // both goals above actually hold: the free credit can only be claimed
+  // once per Supabase user (claim_free_credit() is atomic and checks
+  // free_credit_claimed server-side), and balance survives reinstall as
+  // long as the user signs back in with the same Apple ID.
+  //
+  // REMAINING GAP: add_credits() (called from the purchase screen) has no
+  // payment verification yet — it trusts whatever amount the client sends.
+  // Real verification needs RevenueCat's receipt validation, which is a
+  // separate, not-yet-started task.
   appleUserId: string | null;
   isSignedIn: boolean;
-  signIn: (appleUserId: string) => void;
-  signOut: () => void;
+  signIn: (identityToken: string, rawNonce: string) => Promise<void>;
+  signOut: () => Promise<void>;
 
   credits: number;
-  consumeCredit: () => boolean;
-  addCredits: (amount: number) => void;
+  consumeCredit: () => Promise<boolean>;
+  addCredits: (amount: number) => Promise<void>;
 
   resetFlow: () => void;
 };
@@ -85,6 +96,23 @@ export function FlowProvider({ children }: { children: ReactNode }) {
   const [devForceDetectionFailure, setDevForceDetectionFailure] = useState(false);
   const [appleUserId, setAppleUserId] = useState<string | null>(null);
   const [credits, setCredits] = useState(0);
+
+  const fetchCredits = useCallback(async (userId: string) => {
+    const { data } = await supabase.from('credits').select('balance').eq('user_id', userId).maybeSingle();
+    setCredits(data?.balance ?? 0);
+  }, []);
+
+  // Restore an existing Supabase session (persisted in AsyncStorage) on
+  // launch, so users don't have to sign in again every time they reopen
+  // the app — this is also what makes the free-credit dedup meaningful,
+  // since there's no longer a "sign in again" step to accidentally re-grant it from.
+  useEffect(() => {
+    supabase.auth.getSession().then(({ data }) => {
+      const userId = data.session?.user.id ?? null;
+      setAppleUserId(userId);
+      if (userId) fetchCredits(userId);
+    });
+  }, [fetchCredits]);
 
   const completeOnboarding = useCallback(() => setHasSeenOnboarding(true), []);
 
@@ -123,30 +151,35 @@ export function FlowProvider({ children }: { children: ReactNode }) {
     ]);
   }, []);
 
-  const addCredits = useCallback((amount: number) => {
-    setCredits((current) => current + amount);
+  const signIn = useCallback(async (identityToken: string, rawNonce: string) => {
+    const { data, error } = await supabase.auth.signInWithIdToken({
+      provider: 'apple',
+      token: identityToken,
+      nonce: rawNonce,
+    });
+    if (error || !data.user) throw error ?? new Error('Sign in with Apple returned no user');
+
+    setAppleUserId(data.user.id);
+    const { data: balance } = await supabase.rpc('claim_free_credit');
+    setCredits(balance ?? 0);
   }, []);
 
-  const signIn = useCallback(
-    (id: string) => {
-      setAppleUserId((current) => {
-        if (current === null) addCredits(STARTING_CREDITS);
-        return id;
-      });
-    },
-    [addCredits],
-  );
+  const signOut = useCallback(async () => {
+    await supabase.auth.signOut();
+    setAppleUserId(null);
+    setCredits(0);
+  }, []);
 
-  const signOut = useCallback(() => setAppleUserId(null), []);
+  const consumeCredit = useCallback(async () => {
+    const { data } = await supabase.rpc('consume_credit');
+    if (data === null || data === undefined) return false;
+    setCredits(data);
+    return true;
+  }, []);
 
-  const consumeCredit = useCallback(() => {
-    let success = false;
-    setCredits((current) => {
-      if (current <= 0) return current;
-      success = true;
-      return current - 1;
-    });
-    return success;
+  const addCredits = useCallback(async (amount: number) => {
+    const { data } = await supabase.rpc('add_credits', { amount });
+    setCredits(data ?? 0);
   }, []);
 
   const resetFlow = useCallback(() => {

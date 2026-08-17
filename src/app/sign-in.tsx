@@ -1,4 +1,5 @@
 import * as AppleAuthentication from 'expo-apple-authentication';
+import * as Crypto from 'expo-crypto';
 import { useEffect, useState } from 'react';
 import { useRouter } from 'expo-router';
 import { Alert, StyleSheet, View } from 'react-native';
@@ -25,13 +26,23 @@ export default function SignInScreen() {
 
   async function handleSignIn() {
     try {
+      // rawNonce goes to Supabase, its SHA256 hash goes to Apple — Supabase
+      // hashes rawNonce itself and checks it against the identityToken's
+      // embedded nonce claim, which is how it verifies the token wasn't
+      // replayed from a different sign-in attempt.
+      const rawNonce = Crypto.randomUUID();
+      const hashedNonce = await Crypto.digestStringAsync(Crypto.CryptoDigestAlgorithm.SHA256, rawNonce);
+
       const credential = await AppleAuthentication.signInAsync({
         requestedScopes: [
           AppleAuthentication.AppleAuthenticationScope.FULL_NAME,
           AppleAuthentication.AppleAuthenticationScope.EMAIL,
         ],
+        nonce: hashedNonce,
       });
-      signIn(credential.user);
+      if (!credential.identityToken) throw new Error('Apple did not return an identity token');
+
+      await signIn(credential.identityToken, rawNonce);
       router.back();
     } catch (error) {
       if ((error as { code?: string }).code === 'ERR_REQUEST_CANCELED') return;
