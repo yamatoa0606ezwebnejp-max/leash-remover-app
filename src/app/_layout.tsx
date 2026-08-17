@@ -32,6 +32,7 @@ export default function RootLayout() {
           <Stack.Screen name="processing" options={{ gestureEnabled: false }} />
           <Stack.Screen name="compare" />
           <Stack.Screen name="export" />
+          <Stack.Screen name="sign-in" options={{ presentation: 'modal' }} />
           <Stack.Screen name="purchase" options={{ presentation: 'modal' }} />
         </Stack>
       </FlowProvider>

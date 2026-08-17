@@ -20,7 +20,7 @@ const PRINT_PRESETS = [
 export default function ExportScreen() {
   const router = useRouter();
   const theme = useTheme();
-  const { credits, consumeCredit } = useFlow();
+  const { isSignedIn, credits, consumeCredit } = useFlow();
   const [preset, setPreset] = useState<(typeof PRINT_PRESETS)[number]['id']>('square');
 
   function handleStandardExport() {
@@ -58,7 +58,9 @@ export default function ExportScreen() {
               </ThemedText>
             </View>
             <ThemedText type="small" themeColor="textSecondary">
-              Paid credit · print-ready resolution
+              {isSignedIn
+                ? 'Paid credit · print-ready resolution'
+                : 'Sign in to claim your free credit and keep credits across reinstalls'}
             </ThemedText>
 
             <View style={styles.presetRow}>
@@ -85,7 +87,14 @@ export default function ExportScreen() {
               })}
             </View>
 
-            <Button title="Export" onPress={handlePrintExport} />
+            {isSignedIn ? (
+              <Button title="Export" onPress={handlePrintExport} />
+            ) : (
+              <Button
+                title="Sign In to Get Your Free Credit"
+                onPress={() => router.push('/sign-in')}
+              />
+            )}
           </ThemedView>
         </View>
 
