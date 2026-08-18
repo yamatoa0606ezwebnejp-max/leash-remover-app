@@ -4,6 +4,7 @@ import { useEffect } from 'react';
 import { useColorScheme } from 'react-native';
 
 import { Colors } from '@/constants/theme';
+import { configurePurchases } from '@/lib/purchases';
 import { FlowProvider } from '@/state/flow-context';
 
 SplashScreen.preventAutoHideAsync();
@@ -13,6 +14,7 @@ export default function RootLayout() {
   const theme = Colors[colorScheme === 'dark' ? 'dark' : 'light'];
 
   useEffect(() => {
+    configurePurchases();
     SplashScreen.hideAsync();
   }, []);
 

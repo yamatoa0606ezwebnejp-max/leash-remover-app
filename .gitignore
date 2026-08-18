@@ -42,3 +42,6 @@ example
 /ios
 /android
 .env
+
+# Supabase CLI local link metadata (includes a DB connection string)
+supabase/.temp/

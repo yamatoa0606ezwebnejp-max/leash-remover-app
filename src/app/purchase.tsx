@@ -1,27 +1,78 @@
 import { useRouter } from 'expo-router';
-import { Pressable, StyleSheet, View } from 'react-native';
+import { useCallback, useEffect, useState } from 'react';
+import { ActivityIndicator, Pressable, StyleSheet, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import type { PurchasesError, PurchasesPackage } from 'react-native-purchases';
 
 import { ScreenHeader } from '@/components/screen-header';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { MaxContentWidth, Radius, Spacing } from '@/constants/theme';
+import { CREDIT_PACK_PRODUCT_IDS, Purchases, isPurchasesConfigured } from '@/lib/purchases';
 import { useFlow } from '@/state/flow-context';
 
-const CREDIT_PACKS = [
-  { amount: 3, price: '$2.99' },
-  { amount: 10, price: '$7.99' },
-  { amount: 20, price: '$14.99' },
-];
+// Purchased credits are granted server-side once RevenueCat's webhook fires
+// (see supabase/functions/revenuecat-webhook), so after purchasePackage()
+// resolves we don't know the new balance yet — poll refreshCredits() a few
+// times with backoff instead of trusting a client-side amount.
+async function waitForCreditIncrease(refreshCredits: () => Promise<number>, before: number) {
+  const delaysMs = [500, 1000, 2000, 3000, 5000];
+  for (const delay of delaysMs) {
+    await new Promise((resolve) => setTimeout(resolve, delay));
+    const balance = await refreshCredits();
+    if (balance > before) return true;
+  }
+  return false;
+}
 
 export default function PurchaseScreen() {
   const router = useRouter();
-  const { credits, addCredits } = useFlow();
+  const { credits, refreshCredits } = useFlow();
+  const [packages, setPackages] = useState<PurchasesPackage[]>([]);
+  const [loadingOfferings, setLoadingOfferings] = useState(isPurchasesConfigured());
+  const [purchasingId, setPurchasingId] = useState<string | null>(null);
+  const [waitingForCredit, setWaitingForCredit] = useState(false);
+  const [errorMessage, setErrorMessage] = useState<string | null>(
+    isPurchasesConfigured() ? null : 'Purchases are not configured yet.',
+  );
 
-  async function handlePurchase(amount: number) {
-    await addCredits(amount);
-    router.back();
-  }
+  useEffect(() => {
+    if (!isPurchasesConfigured()) return;
+    Purchases.getOfferings()
+      .then((offerings) => {
+        setPackages(offerings.current?.availablePackages ?? []);
+      })
+      .catch(() => setErrorMessage('Could not load credit packs. Try again later.'))
+      .finally(() => setLoadingOfferings(false));
+  }, []);
+
+  const handlePurchase = useCallback(
+    async (pkg: PurchasesPackage) => {
+      setErrorMessage(null);
+      setPurchasingId(pkg.identifier);
+      const creditsBefore = credits;
+      try {
+        await Purchases.purchasePackage(pkg);
+        setPurchasingId(null);
+        setWaitingForCredit(true);
+        const credited = await waitForCreditIncrease(refreshCredits, creditsBefore);
+        setWaitingForCredit(false);
+        if (credited) {
+          router.back();
+        } else {
+          setErrorMessage(
+            'Purchase completed, but your balance hasn’t updated yet. Pull back into this screen in a moment.',
+          );
+        }
+      } catch (error) {
+        setPurchasingId(null);
+        setWaitingForCredit(false);
+        if ((error as Partial<PurchasesError>)?.userCancelled) return;
+        setErrorMessage('Purchase failed. Please try again.');
+      }
+    },
+    [credits, refreshCredits, router],
+  );
 
   return (
     <ThemedView style={styles.container}>
@@ -32,19 +83,39 @@ export default function PurchaseScreen() {
           Print exports require credits.{'\n'}Current balance: {credits}
         </ThemedText>
 
+        {loadingOfferings && <ActivityIndicator />}
+        {errorMessage && <ThemedText themeColor="textSecondary">{errorMessage}</ThemedText>}
+
         <View style={styles.list}>
-          {CREDIT_PACKS.map((pack) => (
-            <Pressable
-              key={pack.amount}
-              onPress={() => handlePurchase(pack.amount)}
-              style={({ pressed }) => [styles.row, { opacity: pressed ? 0.7 : 1 }]}>
-              <ThemedView type="backgroundElement" style={styles.rowInner}>
-                <ThemedText type="smallBold">{pack.amount} credits</ThemedText>
-                <ThemedText type="mono">{pack.price}</ThemedText>
-              </ThemedView>
-            </Pressable>
-          ))}
+          {packages.map((pkg) => {
+            const amount =
+              CREDIT_PACK_PRODUCT_IDS[pkg.product.identifier as keyof typeof CREDIT_PACK_PRODUCT_IDS];
+            const isPurchasing = purchasingId === pkg.identifier;
+            return (
+              <Pressable
+                key={pkg.identifier}
+                disabled={isPurchasing || waitingForCredit}
+                onPress={() => handlePurchase(pkg)}
+                style={({ pressed }) => [
+                  styles.row,
+                  { opacity: pressed || isPurchasing || waitingForCredit ? 0.7 : 1 },
+                ]}>
+                <ThemedView type="backgroundElement" style={styles.rowInner}>
+                  <ThemedText type="smallBold">
+                    {amount ? `${amount} credits` : pkg.product.title}
+                  </ThemedText>
+                  {isPurchasing ? (
+                    <ActivityIndicator />
+                  ) : (
+                    <ThemedText type="mono">{pkg.product.priceString}</ThemedText>
+                  )}
+                </ThemedView>
+              </Pressable>
+            );
+          })}
         </View>
+
+        {waitingForCredit && <ThemedText themeColor="textSecondary">Confirming purchase…</ThemedText>}
       </SafeAreaView>
     </ThemedView>
   );

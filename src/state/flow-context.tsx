@@ -9,15 +9,40 @@ import {
 } from 'react';
 
 import { supabase } from '@/lib/supabase';
+import { isPurchasesConfigured, Purchases } from '@/lib/purchases';
+
+// RevenueCat's app_user_id must equal the Supabase user id, so that the
+// revenuecat-webhook Edge Function can credit the right account server-side
+// after a real purchase (see supabase/functions/revenuecat-webhook). If
+// RevenueCat isn't configured yet (no API key / non-iOS), skip silently —
+// the rest of the identity/credit flow still works, purchases just won't
+// verify until RevenueCat is set up.
+async function linkPurchasesIdentity(userId: string) {
+  if (!isPurchasesConfigured()) return;
+  try {
+    await Purchases.logIn(userId);
+  } catch (error) {
+    console.warn('Purchases.logIn failed', error);
+  }
+}
+
+async function unlinkPurchasesIdentity() {
+  if (!isPurchasesConfigured()) return;
+  try {
+    await Purchases.logOut();
+  } catch (error) {
+    console.warn('Purchases.logOut failed', error);
+  }
+}
 
 /**
  * In-memory mock state for the photo → detect → correct → remove → export
  * flow. No real detection/removal — see screen-implementation-handoff.md
- * section 5 for what's explicitly out of scope (RevenueCat, image
- * processing API).
+ * section 5 for what's explicitly out of scope (image processing API).
  *
- * Identity (appleUserId) and credits ARE persisted, via Supabase — see the
- * signIn/consumeCredit/addCredits comments below.
+ * Identity (appleUserId) and credits ARE persisted, via Supabase, and
+ * purchased credits ARE verified, via RevenueCat + a webhook — see the
+ * signIn/consumeCredit/refreshCredits comments below.
  */
 
 export type Highlight = {
@@ -70,10 +95,11 @@ type FlowState = {
   // free_credit_claimed server-side), and balance survives reinstall as
   // long as the user signs back in with the same Apple ID.
   //
-  // REMAINING GAP: add_credits() (called from the purchase screen) has no
-  // payment verification yet — it trusts whatever amount the client sends.
-  // Real verification needs RevenueCat's receipt validation, which is a
-  // separate, not-yet-started task.
+  // Purchased credits are verified: RevenueCat confirms the purchase and a
+  // Supabase Edge Function (supabase/functions/revenuecat-webhook) credits
+  // the account server-side, keyed on RevenueCat's app_user_id (== this
+  // Supabase user id, see linkPurchasesIdentity below). The client cannot
+  // grant itself credits directly anymore.
   appleUserId: string | null;
   isSignedIn: boolean;
   signIn: (identityToken: string, rawNonce: string) => Promise<void>;
@@ -81,7 +107,7 @@ type FlowState = {
 
   credits: number;
   consumeCredit: () => Promise<boolean>;
-  addCredits: (amount: number) => Promise<void>;
+  refreshCredits: () => Promise<number>;
 
   resetFlow: () => void;
 };
@@ -99,7 +125,9 @@ export function FlowProvider({ children }: { children: ReactNode }) {
 
   const fetchCredits = useCallback(async (userId: string) => {
     const { data } = await supabase.from('credits').select('balance').eq('user_id', userId).maybeSingle();
-    setCredits(data?.balance ?? 0);
+    const balance = data?.balance ?? 0;
+    setCredits(balance);
+    return balance;
   }, []);
 
   // Restore an existing Supabase session (persisted in AsyncStorage) on
@@ -110,7 +138,10 @@ export function FlowProvider({ children }: { children: ReactNode }) {
     supabase.auth.getSession().then(({ data }) => {
       const userId = data.session?.user.id ?? null;
       setAppleUserId(userId);
-      if (userId) fetchCredits(userId);
+      if (userId) {
+        fetchCredits(userId);
+        linkPurchasesIdentity(userId);
+      }
     });
   }, [fetchCredits]);
 
@@ -160,12 +191,14 @@ export function FlowProvider({ children }: { children: ReactNode }) {
     if (error || !data.user) throw error ?? new Error('Sign in with Apple returned no user');
 
     setAppleUserId(data.user.id);
+    await linkPurchasesIdentity(data.user.id);
     const { data: balance } = await supabase.rpc('claim_free_credit');
     setCredits(balance ?? 0);
   }, []);
 
   const signOut = useCallback(async () => {
     await supabase.auth.signOut();
+    await unlinkPurchasesIdentity();
     setAppleUserId(null);
     setCredits(0);
   }, []);
@@ -177,10 +210,15 @@ export function FlowProvider({ children }: { children: ReactNode }) {
     return true;
   }, []);
 
-  const addCredits = useCallback(async (amount: number) => {
-    const { data } = await supabase.rpc('add_credits', { amount });
-    setCredits(data ?? 0);
-  }, []);
+  // Purchased credits are granted server-side by the revenuecat-webhook Edge
+  // Function once RevenueCat confirms the purchase — the client never tells
+  // the server how many credits to add. This just re-reads the balance after
+  // a purchase completes (the webhook may land a moment after the App Store
+  // sheet closes, so callers should retry a few times).
+  const refreshCredits = useCallback(async () => {
+    if (!appleUserId) return credits;
+    return fetchCredits(appleUserId);
+  }, [appleUserId, fetchCredits, credits]);
 
   const resetFlow = useCallback(() => {
     setPhotoUri(null);
@@ -207,7 +245,7 @@ export function FlowProvider({ children }: { children: ReactNode }) {
       signOut,
       credits,
       consumeCredit,
-      addCredits,
+      refreshCredits,
       resetFlow,
     }),
     [
@@ -226,7 +264,7 @@ export function FlowProvider({ children }: { children: ReactNode }) {
       signOut,
       credits,
       consumeCredit,
-      addCredits,
+      refreshCredits,
       resetFlow,
     ],
   );
