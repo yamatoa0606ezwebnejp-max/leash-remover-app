@@ -8,6 +8,12 @@ import {
   type ReactNode,
 } from 'react';
 
+import {
+  previewLeashTaps,
+  renderLeashRemoval,
+  type Point,
+  type TapPreview,
+} from '@/lib/leash-api';
 import { supabase } from '@/lib/supabase';
 import { isPurchasesConfigured, Purchases } from '@/lib/purchases';
 
@@ -35,37 +41,23 @@ async function unlinkPurchasesIdentity() {
   }
 }
 
-/**
- * In-memory mock state for the photo → detect → correct → remove → export
- * flow. No real detection/removal — see screen-implementation-handoff.md
- * section 5 for what's explicitly out of scope (image processing API).
- *
- * Identity (appleUserId) and credits ARE persisted, via Supabase, and
- * purchased credits ARE verified, via RevenueCat + a webhook — see the
- * signIn/consumeCredit/refreshCredits comments below.
- */
-
-export type Highlight = {
+export type TapPoint = {
   id: string;
-  left: number; // 0–1, fraction of the image container
-  top: number;
-  width: number;
-  height: number;
-  included: boolean;
+  xNorm: number; // 0–1, fraction of the photo (not the on-screen container)
+  yNorm: number;
+  status: 'pending' | 'accepted' | 'rejected';
+  reason: TapPreview['reason'];
 };
 
-const DETECTION_FAILURE_RATE = 0.15;
-const HIGHLIGHT_SIZE = { width: 0.24, height: 0.14 };
+export type RemovalResult = {
+  imageBase64: string;
+  contentType: string;
+};
 
-function randomHighlights(): Highlight[] {
-  const count = 2 + Math.floor(Math.random() * 2); // 2–3
-  return Array.from({ length: count }, (_, index) => ({
-    id: `mock-${Date.now()}-${index}`,
-    left: 0.1 + Math.random() * 0.6,
-    top: 0.15 + Math.random() * 0.6,
-    ...HIGHLIGHT_SIZE,
-    included: true,
-  }));
+const MAX_TAP_POINTS = 8;
+
+function toPixelPoints(points: TapPoint[], width: number, height: number): Point[] {
+  return points.map((p) => ({ x: p.xNorm * width, y: p.yNorm * height }));
 }
 
 type FlowState = {
@@ -73,16 +65,34 @@ type FlowState = {
   completeOnboarding: () => void;
 
   photoUri: string | null;
-  pickPhoto: (uri: string) => void;
+  photoWidth: number;
+  photoHeight: number;
+  pickPhoto: (uri: string, width: number, height: number) => void;
 
-  highlights: Highlight[];
-  detectionFailed: boolean;
-  runDetection: () => boolean;
-  toggleHighlight: (id: string) => void;
-  addHighlightAt: (left: number, top: number) => void;
+  // Leash detection is tap-driven, not automatic — the server's leash
+  // pipeline is a SAM point prompt per tap (see leash-remover-api's
+  // README: "every attempt to detect the leash directly failed"). Each tap
+  // is scored independently by the server, but the whole current point set
+  // is resent on every add/remove so coverage_complete/continue_at reflect
+  // everything accepted so far.
+  tapPoints: TapPoint[];
+  addTapAt: (xNorm: number, yNorm: number) => void;
+  removeTap: (id: string) => void;
+  isPreviewLoading: boolean;
+  anyAccepted: boolean;
+  dogDetected: boolean | null;
+  coverageComplete: boolean;
+  continueAtNorm: { x: number; y: number }[];
 
-  devForceDetectionFailure: boolean;
-  setDevForceDetectionFailure: (value: boolean) => void;
+  isRemoving: boolean;
+  removalResult: RemovalResult | null;
+  // F-05: renders at "standard" resolution, which doubles as the free F-07
+  // export — see export.tsx. Returns whether it succeeded (F-10 on false).
+  runRemoval: () => Promise<boolean>;
+  // F-08: a fresh "print" resolution render, called only once a credit is
+  // confirmed available — see export.tsx for why credits are consumed
+  // after this succeeds, not before.
+  runPrintRender: () => Promise<RemovalResult | null>;
 
   // Sign in with Apple identity, gating print credits. Purpose: (1) prevent
   // free-credit reuse via reinstall, (2) prevent loss of paid consumable
@@ -117,9 +127,19 @@ const FlowContext = createContext<FlowState | null>(null);
 export function FlowProvider({ children }: { children: ReactNode }) {
   const [hasSeenOnboarding, setHasSeenOnboarding] = useState(false);
   const [photoUri, setPhotoUri] = useState<string | null>(null);
-  const [highlights, setHighlights] = useState<Highlight[]>([]);
-  const [detectionFailed, setDetectionFailed] = useState(false);
-  const [devForceDetectionFailure, setDevForceDetectionFailure] = useState(false);
+  const [photoWidth, setPhotoWidth] = useState(0);
+  const [photoHeight, setPhotoHeight] = useState(0);
+
+  const [tapPoints, setTapPoints] = useState<TapPoint[]>([]);
+  const [isPreviewLoading, setIsPreviewLoading] = useState(false);
+  const [anyAccepted, setAnyAccepted] = useState(false);
+  const [dogDetected, setDogDetected] = useState<boolean | null>(null);
+  const [coverageComplete, setCoverageComplete] = useState(false);
+  const [continueAtNorm, setContinueAtNorm] = useState<{ x: number; y: number }[]>([]);
+
+  const [isRemoving, setIsRemoving] = useState(false);
+  const [removalResult, setRemovalResult] = useState<RemovalResult | null>(null);
+
   const [appleUserId, setAppleUserId] = useState<string | null>(null);
   const [credits, setCredits] = useState(0);
 
@@ -147,40 +167,130 @@ export function FlowProvider({ children }: { children: ReactNode }) {
 
   const completeOnboarding = useCallback(() => setHasSeenOnboarding(true), []);
 
-  const pickPhoto = useCallback((uri: string) => {
+  const pickPhoto = useCallback((uri: string, width: number, height: number) => {
     setPhotoUri(uri);
-    setHighlights([]);
-    setDetectionFailed(false);
+    setPhotoWidth(width);
+    setPhotoHeight(height);
+    setTapPoints([]);
+    setAnyAccepted(false);
+    setDogDetected(null);
+    setCoverageComplete(false);
+    setContinueAtNorm([]);
+    setRemovalResult(null);
   }, []);
 
-  const runDetection = useCallback(() => {
-    const failed = devForceDetectionFailure || Math.random() < DETECTION_FAILURE_RATE;
-    setDetectionFailed(failed);
-    setHighlights(failed ? [] : randomHighlights());
-    setDevForceDetectionFailure(false);
-    return !failed;
-  }, [devForceDetectionFailure]);
+  const refreshPreview = useCallback(
+    async (points: TapPoint[]) => {
+      if (!photoUri || points.length === 0) {
+        setAnyAccepted(false);
+        setDogDetected(null);
+        setCoverageComplete(false);
+        setContinueAtNorm([]);
+        return;
+      }
+      setIsPreviewLoading(true);
+      try {
+        const response = await previewLeashTaps(
+          { uri: photoUri },
+          toPixelPoints(points, photoWidth, photoHeight),
+        );
+        setTapPoints((current) =>
+          current.map((point) => {
+            const index = points.findIndex((p) => p.id === point.id);
+            const preview = index === -1 ? undefined : response.previews[index];
+            if (!preview) return point;
+            return {
+              ...point,
+              status: preview.accepted ? 'accepted' : 'rejected',
+              reason: preview.reason,
+            };
+          }),
+        );
+        setAnyAccepted(response.any_accepted);
+        setDogDetected(response.dog_detected);
+        setCoverageComplete(response.coverage_complete);
+        setContinueAtNorm(
+          response.continue_at.map((p) => ({ x: p.x / photoWidth, y: p.y / photoHeight })),
+        );
+      } catch (error) {
+        console.warn('previewLeashTaps failed', error);
+      } finally {
+        setIsPreviewLoading(false);
+      }
+    },
+    [photoUri, photoWidth, photoHeight],
+  );
 
-  const toggleHighlight = useCallback((id: string) => {
-    setHighlights((current) =>
-      current.map((highlight) =>
-        highlight.id === id ? { ...highlight, included: !highlight.included } : highlight,
-      ),
-    );
+  // Re-preview whenever the set of tap points changes (add or remove) — not
+  // when their status changes, which this same effect just caused. Keying
+  // on the joined ids rather than the array itself is what keeps that from
+  // looping.
+  const tapIdsKey = tapPoints.map((p) => p.id).join(',');
+  useEffect(() => {
+    // Syncs the tap set to the server (an external system) — the eventual
+    // setState happens after the network round trip, not synchronously.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    refreshPreview(tapPoints);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tapIdsKey]);
+
+  const addTapAt = useCallback((xNorm: number, yNorm: number) => {
+    setTapPoints((current) => {
+      if (current.length >= MAX_TAP_POINTS) return current;
+      return [
+        ...current,
+        {
+          id: `tap-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+          xNorm,
+          yNorm,
+          status: 'pending',
+          reason: null,
+        },
+      ];
+    });
   }, []);
 
-  const addHighlightAt = useCallback((left: number, top: number) => {
-    setHighlights((current) => [
-      ...current,
-      {
-        id: `manual-${Date.now()}`,
-        left: Math.min(Math.max(left - HIGHLIGHT_SIZE.width / 2, 0), 1 - HIGHLIGHT_SIZE.width),
-        top: Math.min(Math.max(top - HIGHLIGHT_SIZE.height / 2, 0), 1 - HIGHLIGHT_SIZE.height),
-        ...HIGHLIGHT_SIZE,
-        included: true,
-      },
-    ]);
+  const removeTap = useCallback((id: string) => {
+    setTapPoints((current) => current.filter((point) => point.id !== id));
   }, []);
+
+  const runRemoval = useCallback(async () => {
+    if (!photoUri) return false;
+    setIsRemoving(true);
+    try {
+      const accepted = tapPoints.filter((point) => point.status === 'accepted');
+      const result = await renderLeashRemoval(
+        { uri: photoUri },
+        toPixelPoints(accepted, photoWidth, photoHeight),
+        { export: 'standard', lossless: false },
+      );
+      if (!result.succeeded) return false;
+      setRemovalResult({ imageBase64: result.image, contentType: result.content_type });
+      return true;
+    } catch (error) {
+      console.warn('renderLeashRemoval (standard) failed', error);
+      return false;
+    } finally {
+      setIsRemoving(false);
+    }
+  }, [photoUri, photoWidth, photoHeight, tapPoints]);
+
+  const runPrintRender = useCallback(async (): Promise<RemovalResult | null> => {
+    if (!photoUri) return null;
+    try {
+      const accepted = tapPoints.filter((point) => point.status === 'accepted');
+      const result = await renderLeashRemoval(
+        { uri: photoUri },
+        toPixelPoints(accepted, photoWidth, photoHeight),
+        { export: 'print', lossless: false },
+      );
+      if (!result.succeeded) return null;
+      return { imageBase64: result.image, contentType: result.content_type };
+    } catch (error) {
+      console.warn('renderLeashRemoval (print) failed', error);
+      return null;
+    }
+  }, [photoUri, photoWidth, photoHeight, tapPoints]);
 
   const signIn = useCallback(async (identityToken: string, rawNonce: string) => {
     const { data, error } = await supabase.auth.signInWithIdToken({
@@ -222,8 +332,14 @@ export function FlowProvider({ children }: { children: ReactNode }) {
 
   const resetFlow = useCallback(() => {
     setPhotoUri(null);
-    setHighlights([]);
-    setDetectionFailed(false);
+    setPhotoWidth(0);
+    setPhotoHeight(0);
+    setTapPoints([]);
+    setAnyAccepted(false);
+    setDogDetected(null);
+    setCoverageComplete(false);
+    setContinueAtNorm([]);
+    setRemovalResult(null);
   }, []);
 
   const value = useMemo<FlowState>(
@@ -231,14 +347,21 @@ export function FlowProvider({ children }: { children: ReactNode }) {
       hasSeenOnboarding,
       completeOnboarding,
       photoUri,
+      photoWidth,
+      photoHeight,
       pickPhoto,
-      highlights,
-      detectionFailed,
-      runDetection,
-      toggleHighlight,
-      addHighlightAt,
-      devForceDetectionFailure,
-      setDevForceDetectionFailure,
+      tapPoints,
+      addTapAt,
+      removeTap,
+      isPreviewLoading,
+      anyAccepted,
+      dogDetected,
+      coverageComplete,
+      continueAtNorm,
+      isRemoving,
+      removalResult,
+      runRemoval,
+      runPrintRender,
       appleUserId,
       isSignedIn: appleUserId !== null,
       signIn,
@@ -252,13 +375,21 @@ export function FlowProvider({ children }: { children: ReactNode }) {
       hasSeenOnboarding,
       completeOnboarding,
       photoUri,
+      photoWidth,
+      photoHeight,
       pickPhoto,
-      highlights,
-      detectionFailed,
-      runDetection,
-      toggleHighlight,
-      addHighlightAt,
-      devForceDetectionFailure,
+      tapPoints,
+      addTapAt,
+      removeTap,
+      isPreviewLoading,
+      anyAccepted,
+      dogDetected,
+      coverageComplete,
+      continueAtNorm,
+      isRemoving,
+      removalResult,
+      runRemoval,
+      runPrintRender,
       appleUserId,
       signIn,
       signOut,

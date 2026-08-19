@@ -20,20 +20,43 @@ const PRINT_PRESETS = [
 export default function ExportScreen() {
   const router = useRouter();
   const theme = useTheme();
-  const { isSignedIn, credits, consumeCredit } = useFlow();
+  const { isSignedIn, credits, consumeCredit, runPrintRender, removalResult } = useFlow();
   const [preset, setPreset] = useState<(typeof PRINT_PRESETS)[number]['id']>('square');
+  const [isExportingPrint, setIsExportingPrint] = useState(false);
 
   function handleStandardExport() {
+    // The F-05 render already produced this image at standard resolution —
+    // this is that same result, not a fresh server call. Saving it to the
+    // camera roll isn't wired up yet (no expo-media-library dependency).
+    if (!removalResult) return;
     Alert.alert('Exported', 'Your standard export (free) is complete.');
   }
 
   async function handlePrintExport() {
-    const success = await consumeCredit();
-    if (!success) {
+    if (credits <= 0) {
       router.push('/purchase');
       return;
     }
-    Alert.alert('Exported', 'Your print export is complete. 1 credit was used.');
+    setIsExportingPrint(true);
+    try {
+      // Render at print resolution first, and only spend a credit once the
+      // server confirms it succeeded — see leash-remover-api's docs/api.md:
+      // "the client must not charge a credit" on a failed render.
+      const result = await runPrintRender();
+      if (!result) {
+        Alert.alert('Export failed', 'The photo could not be processed. Please try again.');
+        return;
+      }
+      const charged = await consumeCredit();
+      Alert.alert(
+        'Exported',
+        charged
+          ? 'Your print export is complete. 1 credit was used.'
+          : 'Your print export is complete.',
+      );
+    } finally {
+      setIsExportingPrint(false);
+    }
   }
 
   return (
@@ -47,7 +70,12 @@ export default function ExportScreen() {
             <ThemedText type="small" themeColor="textSecondary">
               Free · social-media resolution
             </ThemedText>
-            <Button title="Export" variant="secondary" onPress={handleStandardExport} />
+            <Button
+              title="Export"
+              variant="secondary"
+              disabled={!removalResult}
+              onPress={handleStandardExport}
+            />
           </ThemedView>
 
           <ThemedView type="backgroundElement" style={styles.card}>
@@ -88,7 +116,11 @@ export default function ExportScreen() {
             </View>
 
             {isSignedIn ? (
-              <Button title="Export" onPress={handlePrintExport} />
+              <Button
+                title={isExportingPrint ? 'Processing…' : 'Export'}
+                disabled={isExportingPrint}
+                onPress={handlePrintExport}
+              />
             ) : (
               <Button
                 title="Sign In to Get Your Free Credit"

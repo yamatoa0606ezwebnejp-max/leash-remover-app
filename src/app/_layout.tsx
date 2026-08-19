@@ -28,7 +28,6 @@ export default function RootLayout() {
           }}>
           <Stack.Screen name="index" />
           <Stack.Screen name="onboarding" options={{ gestureEnabled: false }} />
-          <Stack.Screen name="detect" options={{ gestureEnabled: false }} />
           <Stack.Screen name="detect-failed" />
           <Stack.Screen name="correct" />
           <Stack.Screen name="processing" options={{ gestureEnabled: false }} />

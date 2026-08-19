@@ -10,8 +10,8 @@ import { useFlow } from '@/state/flow-context';
 
 const POINTS = [
   {
-    title: 'Your photo stays on this device',
-    body: 'We use the photo you select only to detect and remove the leash.',
+    title: 'Your photo is never stored',
+    body: "It's sent securely to remove the leash, then discarded immediately — nothing is written to disk.",
   },
   {
     title: 'Nothing is shared automatically',

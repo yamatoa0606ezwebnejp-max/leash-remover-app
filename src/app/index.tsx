@@ -1,18 +1,18 @@
 import * as ImagePicker from 'expo-image-picker';
 import { Redirect, useRouter } from 'expo-router';
-import { Alert, StyleSheet, Switch, View } from 'react-native';
+import { Alert, StyleSheet, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { Button } from '@/components/ui/button';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { MaxContentWidth, Spacing } from '@/constants/theme';
+import { isLeashApiConfigured, warmLeashApi } from '@/lib/leash-api';
 import { useFlow } from '@/state/flow-context';
 
 export default function PhotoSelectScreen() {
   const router = useRouter();
-  const { hasSeenOnboarding, pickPhoto, devForceDetectionFailure, setDevForceDetectionFailure } =
-    useFlow();
+  const { hasSeenOnboarding, pickPhoto } = useFlow();
 
   if (!hasSeenOnboarding) {
     return <Redirect href="/onboarding" />;
@@ -25,6 +25,14 @@ export default function PhotoSelectScreen() {
       return;
     }
 
+    // Fire-and-forget: buys back most of the ~34s cold start (see
+    // leash-remover-api's docs/api.md) while the user is still picking and
+    // tapping. Not awaited — a failure here just means the first real call
+    // pays the full cold start instead.
+    if (isLeashApiConfigured()) {
+      warmLeashApi().catch(() => {});
+    }
+
     const result = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: ['images'],
       allowsEditing: false,
@@ -33,8 +41,9 @@ export default function PhotoSelectScreen() {
 
     if (result.canceled) return;
 
-    pickPhoto(result.assets[0].uri);
-    router.push('/detect');
+    const asset = result.assets[0];
+    pickPhoto(asset.uri, asset.width, asset.height);
+    router.push('/correct');
   }
 
   return (
@@ -55,13 +64,6 @@ export default function PhotoSelectScreen() {
             Select one photo
           </ThemedText>
         </View>
-
-        {__DEV__ && (
-          <ThemedView type="backgroundElement" style={styles.devPanel}>
-            <ThemedText type="small">Force detection failure (dev)</ThemedText>
-            <Switch value={devForceDetectionFailure} onValueChange={setDevForceDetectionFailure} />
-          </ThemedView>
-        )}
       </SafeAreaView>
     </ThemedView>
   );
@@ -88,18 +90,6 @@ const styles = StyleSheet.create({
   },
   actions: {
     gap: Spacing.two,
-    alignItems: 'center',
-  },
-  devPanel: {
-    position: 'absolute',
-    bottom: Spacing.four,
-    left: Spacing.four,
-    right: Spacing.four,
-    borderRadius: Spacing.three,
-    paddingVertical: Spacing.two,
-    paddingHorizontal: Spacing.three,
-    flexDirection: 'row',
-    justifyContent: 'space-between',
     alignItems: 'center',
   },
 });

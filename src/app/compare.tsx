@@ -15,8 +15,12 @@ import { useFlow } from '@/state/flow-context';
 export default function CompareScreen() {
   const router = useRouter();
   const theme = useTheme();
-  const { photoUri } = useFlow();
+  const { photoUri, removalResult } = useFlow();
   const [showOriginal, setShowOriginal] = useState(false);
+
+  const resultUri = removalResult
+    ? `data:${removalResult.contentType};base64,${removalResult.imageBase64}`
+    : null;
 
   return (
     <ThemedView style={styles.container}>
@@ -27,9 +31,11 @@ export default function CompareScreen() {
           onPressIn={() => setShowOriginal(true)}
           onPressOut={() => setShowOriginal(false)}
           style={styles.imageWrapper}>
-          {photoUri && <Image source={{ uri: photoUri }} style={styles.image} contentFit="cover" />}
-          {!showOriginal && (
-            <View style={[styles.processedTint, { backgroundColor: theme.primary + '26' }]} />
+          {photoUri && showOriginal && (
+            <Image source={{ uri: photoUri }} style={styles.image} contentFit="cover" />
+          )}
+          {resultUri && !showOriginal && (
+            <Image source={{ uri: resultUri }} style={styles.image} contentFit="cover" />
           )}
           <View style={[styles.badge, { backgroundColor: theme.primaryDark + 'CC' }]}>
             <ThemedText type="smallBold" style={{ color: theme.onPrimary }}>
@@ -39,7 +45,7 @@ export default function CompareScreen() {
         </Pressable>
 
         <ThemedText type="small" themeColor="textSecondary" style={styles.centerText}>
-          Press and hold to see the original (mock preview)
+          Press and hold to see the original
         </ThemedText>
 
         <View style={styles.footer}>
@@ -76,9 +82,6 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
   },
   image: {
-    ...StyleSheet.absoluteFill,
-  },
-  processedTint: {
     ...StyleSheet.absoluteFill,
   },
   badge: {

@@ -7,19 +7,24 @@ import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { MaxContentWidth, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
-
-const MOCK_PROCESSING_DELAY = 1500;
+import { useFlow } from '@/state/flow-context';
 
 export default function ProcessingScreen() {
   const router = useRouter();
   const theme = useTheme();
+  const { runRemoval } = useFlow();
 
   useEffect(() => {
-    const timer = setTimeout(() => {
-      router.replace('/compare');
-    }, MOCK_PROCESSING_DELAY);
-    return () => clearTimeout(timer);
-  }, [router]);
+    let cancelled = false;
+    runRemoval().then((succeeded) => {
+      if (cancelled) return;
+      router.replace(succeeded ? '/compare' : '/detect-failed');
+    });
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   return (
     <ThemedView style={styles.container}>
