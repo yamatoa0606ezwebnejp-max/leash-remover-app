@@ -1,3 +1,5 @@
+import { File, Paths } from 'expo-file-system';
+import * as MediaLibrary from 'expo-media-library';
 import { useRouter } from 'expo-router';
 import { useState } from 'react';
 import { Alert, Pressable, StyleSheet, View } from 'react-native';
@@ -17,19 +19,61 @@ const PRINT_PRESETS = [
   { id: 'landscape', label: 'Landscape' },
 ] as const;
 
+// content_type is e.g. "image/png" or "image/jpeg" — MediaLibrary's
+// Asset.create() infers the asset type from the file's extension, so the
+// temp file needs a real one, not just a random name.
+function extensionForContentType(contentType: string) {
+  const subtype = contentType.split('/')[1] ?? 'jpg';
+  return subtype === 'jpeg' ? 'jpg' : subtype;
+}
+
 export default function ExportScreen() {
   const router = useRouter();
   const theme = useTheme();
   const { isSignedIn, credits, consumeCredit, runPrintRender, removalResult } = useFlow();
   const [preset, setPreset] = useState<(typeof PRINT_PRESETS)[number]['id']>('square');
+  const [isExportingStandard, setIsExportingStandard] = useState(false);
   const [isExportingPrint, setIsExportingPrint] = useState(false);
 
-  function handleStandardExport() {
+  async function saveToCameraRoll(imageBase64: string, contentType: string) {
+    const { status } = await MediaLibrary.requestPermissionsAsync(true);
+    if (status !== 'granted') {
+      Alert.alert(
+        'Permission needed',
+        'Allow photo library access in Settings to save your export.',
+      );
+      return false;
+    }
+
+    // Asset.create() needs a real file on disk — it can't take base64
+    // directly, so write it to a throwaway cache file first.
+    const file = new File(Paths.cache, `leashoff-${Date.now()}.${extensionForContentType(contentType)}`);
+    file.create();
+    file.write(imageBase64, { encoding: 'base64' });
+    try {
+      await MediaLibrary.Asset.create(file.uri);
+      return true;
+    } finally {
+      file.delete();
+    }
+  }
+
+  async function handleStandardExport() {
     // The F-05 render already produced this image at standard resolution —
-    // this is that same result, not a fresh server call. Saving it to the
-    // camera roll isn't wired up yet (no expo-media-library dependency).
+    // this is that same result, not a fresh server call.
     if (!removalResult) return;
-    Alert.alert('Exported', 'Your standard export (free) is complete.');
+    setIsExportingStandard(true);
+    try {
+      const saved = await saveToCameraRoll(removalResult.imageBase64, removalResult.contentType);
+      if (saved) {
+        Alert.alert('Exported', 'Your standard export (free) was saved to Photos.');
+      }
+    } catch (error) {
+      console.warn('saveToCameraRoll (standard) failed', error);
+      Alert.alert('Export failed', 'Could not save the photo. Please try again.');
+    } finally {
+      setIsExportingStandard(false);
+    }
   }
 
   async function handlePrintExport() {
@@ -48,12 +92,25 @@ export default function ExportScreen() {
         return;
       }
       const charged = await consumeCredit();
-      Alert.alert(
-        'Exported',
-        charged
-          ? 'Your print export is complete. 1 credit was used.'
-          : 'Your print export is complete.',
-      );
+      try {
+        const saved = await saveToCameraRoll(result.imageBase64, result.contentType);
+        if (saved) {
+          Alert.alert(
+            'Exported',
+            charged
+              ? 'Your print export was saved to Photos. 1 credit was used.'
+              : 'Your print export was saved to Photos.',
+          );
+        }
+      } catch (error) {
+        console.warn('saveToCameraRoll (print) failed', error);
+        Alert.alert(
+          'Save failed',
+          charged
+            ? 'The export rendered and your credit was used, but saving to Photos failed. Please try again.'
+            : 'The export rendered, but saving to Photos failed. Please try again.',
+        );
+      }
     } finally {
       setIsExportingPrint(false);
     }
@@ -71,9 +128,9 @@ export default function ExportScreen() {
               Free · social-media resolution
             </ThemedText>
             <Button
-              title="Export"
+              title={isExportingStandard ? 'Saving…' : 'Export'}
               variant="secondary"
-              disabled={!removalResult}
+              disabled={!removalResult || isExportingStandard}
               onPress={handleStandardExport}
             />
           </ThemedView>

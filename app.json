@@ -41,6 +41,12 @@
           "photosPermission": "Allow $(PRODUCT_NAME) to access your photos to remove the leash."
         }
       ],
+      [
+        "expo-media-library",
+        {
+          "savePhotosPermission": "Allow $(PRODUCT_NAME) to save your exported photo."
+        }
+      ],
       "expo-apple-authentication"
     ],
     "experiments": {
