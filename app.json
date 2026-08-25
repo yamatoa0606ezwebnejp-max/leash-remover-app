@@ -1,7 +1,7 @@
 {
   "expo": {
     "name": "LeashOff",
-   "slug": "leash-remover-app",
+    "slug": "leash-remover-app",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
@@ -9,7 +9,7 @@
     "userInterfaceStyle": "automatic",
     "ios": {
       "icon": "./assets/expo.icon",
-"bundleIdentifier": "com.yamatohoriguchi.leashoff",
+      "bundleIdentifier": "com.yamatohoriguchi.leashoff",
       "usesAppleSignIn": true
     },
     "android": {
@@ -47,7 +47,8 @@
           "savePhotosPermission": "Allow $(PRODUCT_NAME) to save your exported photo."
         }
       ],
-      "expo-apple-authentication"
+      "expo-apple-authentication",
+      "expo-secure-store"
     ],
     "experiments": {
       "typedRoutes": true,
