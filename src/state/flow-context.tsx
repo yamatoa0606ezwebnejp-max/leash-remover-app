@@ -98,8 +98,9 @@ type FlowState = {
   // free-credit reuse via reinstall, (2) prevent loss of paid consumable
   // credits on reinstall (Apple's Restore Purchases can't recover them).
   //
-  // Identity + credits are persisted via Supabase (session in AsyncStorage,
-  // balance in Postgres — see supabase/schema.sql), not local state, so
+  // Identity + credits are persisted via Supabase (session in the Keychain
+  // via expo-secure-store — see src/lib/secure-storage.ts — balance in
+  // Postgres, see supabase/schema.sql), not local state, so
   // both goals above actually hold: the free credit can only be claimed
   // once per Supabase user (claim_free_credit() is atomic and checks
   // free_credit_claimed server-side), and balance survives reinstall as
@@ -141,6 +142,7 @@ export function FlowProvider({ children }: { children: ReactNode }) {
   const [removalResult, setRemovalResult] = useState<RemovalResult | null>(null);
 
   const [appleUserId, setAppleUserId] = useState<string | null>(null);
+  const [isAnonymous, setIsAnonymous] = useState(true);
   const [credits, setCredits] = useState(0);
 
   const fetchCredits = useCallback(async (userId: string) => {
@@ -150,19 +152,38 @@ export function FlowProvider({ children }: { children: ReactNode }) {
     return balance;
   }, []);
 
-  // Restore an existing Supabase session (persisted in AsyncStorage) on
+  // Restore an existing Supabase session (persisted in the Keychain) on
   // launch, so users don't have to sign in again every time they reopen
   // the app — this is also what makes the free-credit dedup meaningful,
   // since there's no longer a "sign in again" step to accidentally re-grant it from.
+  //
+  // /v2 of leash-remover-api requires a Supabase JWT on every call, including
+  // the free flow (taps, standard render), so every launch needs a session —
+  // anonymous if there's no real one yet. Sign in with Apple later upgrades
+  // this same session via linkIdentity() rather than starting a new one (see
+  // signIn below), which is what keeps free-flow usage working without a
+  // sign-in wall (App Store Review Guideline 5.1.1(v)).
   useEffect(() => {
-    supabase.auth.getSession().then(({ data }) => {
-      const userId = data.session?.user.id ?? null;
-      setAppleUserId(userId);
-      if (userId) {
-        fetchCredits(userId);
-        linkPurchasesIdentity(userId);
+    async function bootstrap() {
+      const { data } = await supabase.auth.getSession();
+      let session = data.session;
+      if (!session) {
+        const { data: anon, error } = await supabase.auth.signInAnonymously();
+        if (error) {
+          console.warn('signInAnonymously failed', error);
+          return;
+        }
+        session = anon.session;
       }
-    });
+      const user = session?.user ?? null;
+      setAppleUserId(user?.id ?? null);
+      setIsAnonymous(user?.is_anonymous ?? true);
+      if (user && !user.is_anonymous) {
+        fetchCredits(user.id);
+        linkPurchasesIdentity(user.id);
+      }
+    }
+    bootstrap();
   }, [fetchCredits]);
 
   const completeOnboarding = useCallback(() => setHasSeenOnboarding(true), []);
@@ -293,24 +314,61 @@ export function FlowProvider({ children }: { children: ReactNode }) {
   }, [photoUri, photoWidth, photoHeight, tapPoints]);
 
   const signIn = useCallback(async (identityToken: string, rawNonce: string) => {
-    const { data, error } = await supabase.auth.signInWithIdToken({
+    // linkIdentity() first — the app is already signed in anonymously (see
+    // bootstrap above), and this upgrades that same session/uid rather than
+    // creating a second user. But this Apple identity may already be linked
+    // to a *different*, pre-existing user (a real reinstall, or — as found
+    // testing TODO 142 — the same Apple ID used before /v2 existed): Supabase
+    // then refuses the link with 422 identity_already_exists. In that case
+    // fall back to signInWithIdToken(), which signs into that existing
+    // account instead — the anonymous session is discarded, but that's
+    // correct: the existing account is the one with the user's real credit
+    // balance, and reinstall recovery is the whole point of this flow.
+    const uidBefore = appleUserId;
+    let { data, error } = await supabase.auth.linkIdentity({
       provider: 'apple',
       token: identityToken,
       nonce: rawNonce,
     });
+
+    if (error?.code === 'identity_already_exists') {
+      // TEMPORARY — TODO 142 diagnostics, remove once this path is trusted.
+      console.log('[TODO142] linkIdentity: identity_already_exists, falling back to signInWithIdToken');
+      ({ data, error } = await supabase.auth.signInWithIdToken({
+        provider: 'apple',
+        token: identityToken,
+        nonce: rawNonce,
+      }));
+    }
     if (error || !data.user) throw error ?? new Error('Sign in with Apple returned no user');
 
+    // TEMPORARY — TODO 142 verification, remove once confirmed on-device.
+    console.log('[TODO142] uid before:', uidBefore);
+    console.log('[TODO142] uid after: ', data.user.id);
+    console.log('[TODO142] uid preserved:', uidBefore === data.user.id);
+
     setAppleUserId(data.user.id);
+    setIsAnonymous(false);
     await linkPurchasesIdentity(data.user.id);
     const { data: balance } = await supabase.rpc('claim_free_credit');
     setCredits(balance ?? 0);
-  }, []);
+  }, [appleUserId]);
 
   const signOut = useCallback(async () => {
     await supabase.auth.signOut();
     await unlinkPurchasesIdentity();
-    setAppleUserId(null);
     setCredits(0);
+    // /v2 needs a session for every call, including the free flow, so drop
+    // straight back into an anonymous one rather than leaving no session.
+    const { data, error } = await supabase.auth.signInAnonymously();
+    if (error) {
+      console.warn('signInAnonymously (post sign-out) failed', error);
+      setAppleUserId(null);
+      setIsAnonymous(true);
+      return;
+    }
+    setAppleUserId(data.user?.id ?? null);
+    setIsAnonymous(true);
   }, []);
 
   const consumeCredit = useCallback(async () => {
@@ -363,7 +421,7 @@ export function FlowProvider({ children }: { children: ReactNode }) {
       runRemoval,
       runPrintRender,
       appleUserId,
-      isSignedIn: appleUserId !== null,
+      isSignedIn: appleUserId !== null && !isAnonymous,
       signIn,
       signOut,
       credits,
@@ -391,6 +449,7 @@ export function FlowProvider({ children }: { children: ReactNode }) {
       runRemoval,
       runPrintRender,
       appleUserId,
+      isAnonymous,
       signIn,
       signOut,
       credits,

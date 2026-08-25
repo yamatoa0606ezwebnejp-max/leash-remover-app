@@ -46,6 +46,8 @@ export default function SignInScreen() {
       router.back();
     } catch (error) {
       if ((error as { code?: string }).code === 'ERR_REQUEST_CANCELED') return;
+      // TEMPORARY — TODO 142 diagnostics, remove once the real error is known.
+      console.log('[TODO142] sign-in failed:', JSON.stringify(error, Object.getOwnPropertyNames(error)));
       Alert.alert('Sign in failed', 'Please try again.');
     }
   }
