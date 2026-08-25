@@ -31,7 +31,8 @@ yarn-error.*
 *.pem
 
 # local env files
-.env*.local
+.env*
+!.env.example
 
 # typescript
 *.tsbuildinfo
@@ -41,7 +42,6 @@ example
 # generated native folders
 /ios
 /android
-.env
 
 # Supabase CLI local link metadata (includes a DB connection string)
 supabase/.temp/
