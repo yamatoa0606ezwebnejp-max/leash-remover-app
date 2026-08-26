@@ -1,5 +1,7 @@
 module.exports = function (api) {
-  api.cache(true);
+  // Not api.cache(true) — plugins below reads NODE_ENV, so the cache key must too,
+  // or a dev-time compile (plugins: []) gets reused for a production build.
+  api.cache.using(() => process.env.NODE_ENV);
   return {
     presets: ['babel-preset-expo'],
     // Strip console.* from release builds — see

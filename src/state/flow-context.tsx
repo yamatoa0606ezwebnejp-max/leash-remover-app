@@ -324,7 +324,6 @@ export function FlowProvider({ children }: { children: ReactNode }) {
     // account instead — the anonymous session is discarded, but that's
     // correct: the existing account is the one with the user's real credit
     // balance, and reinstall recovery is the whole point of this flow.
-    const uidBefore = appleUserId;
     let { data, error } = await supabase.auth.linkIdentity({
       provider: 'apple',
       token: identityToken,
@@ -332,8 +331,6 @@ export function FlowProvider({ children }: { children: ReactNode }) {
     });
 
     if (error?.code === 'identity_already_exists') {
-      // TEMPORARY — TODO 142 diagnostics, remove once this path is trusted.
-      console.log('[TODO142] linkIdentity: identity_already_exists, falling back to signInWithIdToken');
       ({ data, error } = await supabase.auth.signInWithIdToken({
         provider: 'apple',
         token: identityToken,
@@ -342,17 +339,12 @@ export function FlowProvider({ children }: { children: ReactNode }) {
     }
     if (error || !data.user) throw error ?? new Error('Sign in with Apple returned no user');
 
-    // TEMPORARY — TODO 142 verification, remove once confirmed on-device.
-    console.log('[TODO142] uid before:', uidBefore);
-    console.log('[TODO142] uid after: ', data.user.id);
-    console.log('[TODO142] uid preserved:', uidBefore === data.user.id);
-
     setAppleUserId(data.user.id);
     setIsAnonymous(false);
     await linkPurchasesIdentity(data.user.id);
     const { data: balance } = await supabase.rpc('claim_free_credit');
     setCredits(balance ?? 0);
-  }, [appleUserId]);
+  }, []);
 
   const signOut = useCallback(async () => {
     await supabase.auth.signOut();
