@@ -4,13 +4,16 @@ import {
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type ReactNode,
 } from 'react';
+import * as Crypto from 'expo-crypto';
 
 import {
   previewLeashTaps,
   renderLeashRemoval,
+  InsufficientCreditsError,
   type Point,
   type TapPreview,
 } from '@/lib/leash-api';
@@ -52,6 +55,7 @@ export type TapPoint = {
 export type RemovalResult = {
   imageBase64: string;
   contentType: string;
+  creditBalance?: number;
 };
 
 const MAX_TAP_POINTS = 8;
@@ -90,8 +94,11 @@ type FlowState = {
   // export — see export.tsx. Returns whether it succeeded (F-10 on false).
   runRemoval: () => Promise<boolean>;
   // F-08: a fresh "print" resolution render, called only once a credit is
-  // confirmed available — see export.tsx for why credits are consumed
-  // after this succeeds, not before.
+  // confirmed available. /v2/render (export=print) charges atomically
+  // server-side — it either returns the image and charges once, or does
+  // neither — so there's no separate client-side consume step; the caller
+  // just reads RemovalResult.creditBalance for the post-charge balance.
+  // Throws InsufficientCreditsError (leash-api.ts) on the server's 402.
   runPrintRender: () => Promise<RemovalResult | null>;
 
   // Sign in with Apple identity, gating print credits. Purpose: (1) prevent
@@ -117,7 +124,6 @@ type FlowState = {
   signOut: () => Promise<void>;
 
   credits: number;
-  consumeCredit: () => Promise<boolean>;
   refreshCredits: () => Promise<number>;
 
   resetFlow: () => void;
@@ -144,6 +150,14 @@ export function FlowProvider({ children }: { children: ReactNode }) {
   const [appleUserId, setAppleUserId] = useState<string | null>(null);
   const [isAnonymous, setIsAnonymous] = useState(true);
   const [credits, setCredits] = useState(0);
+
+  // The request_id for the print export currently in flight/last-failed —
+  // stable across a manual retry of the *same* attempt (renderLeashRemoval
+  // requires the caller to supply one precisely so it can stay stable here),
+  // cleared once that attempt succeeds or the user moves to a different
+  // photo. A ref, not state: it must not survive across export attempts by
+  // accident, but changing it should never itself trigger a re-render.
+  const printRequestIdRef = useRef<string | null>(null);
 
   const fetchCredits = useCallback(async (userId: string) => {
     const { data } = await supabase.from('credits').select('balance').eq('user_id', userId).maybeSingle();
@@ -189,6 +203,7 @@ export function FlowProvider({ children }: { children: ReactNode }) {
   const completeOnboarding = useCallback(() => setHasSeenOnboarding(true), []);
 
   const pickPhoto = useCallback((uri: string, width: number, height: number) => {
+    printRequestIdRef.current = null;
     setPhotoUri(uri);
     setPhotoWidth(width);
     setPhotoHeight(height);
@@ -298,16 +313,37 @@ export function FlowProvider({ children }: { children: ReactNode }) {
 
   const runPrintRender = useCallback(async (): Promise<RemovalResult | null> => {
     if (!photoUri) return null;
+    // Reuse the in-flight/last-failed attempt's id if there is one, so a
+    // manual retry (the user tapping "Export" again after a lost response)
+    // charges at most once — see leash-api.ts's renderLeashRemoval. Only
+    // cleared below on confirmed success, or in pickPhoto/resetFlow.
+    if (!printRequestIdRef.current) {
+      printRequestIdRef.current = Crypto.randomUUID();
+    }
     try {
       const accepted = tapPoints.filter((point) => point.status === 'accepted');
       const result = await renderLeashRemoval(
         { uri: photoUri },
         toPixelPoints(accepted, photoWidth, photoHeight),
-        { export: 'print', lossless: false },
+        { export: 'print', lossless: false, requestId: printRequestIdRef.current },
       );
       if (!result.succeeded) return null;
-      return { imageBase64: result.image, contentType: result.content_type };
+      printRequestIdRef.current = null;
+      // The server sends credit_balance as null (not an omitted key) on a
+      // non-print render — verified against the deployed /v2 — so guard
+      // with typeof rather than a null/undefined check.
+      if (typeof result.credit_balance === 'number') setCredits(result.credit_balance);
+      return {
+        imageBase64: result.image,
+        contentType: result.content_type,
+        creditBalance: result.credit_balance ?? undefined,
+      };
     } catch (error) {
+      // Let the caller (export.tsx) send the user to the purchase screen on
+      // a 402 rather than showing it as a generic render failure. No charge
+      // happened either way, so printRequestIdRef is left as-is — reusing it
+      // on a subsequent attempt is still correct, just unnecessary.
+      if (error instanceof InsufficientCreditsError) throw error;
       console.warn('renderLeashRemoval (print) failed', error);
       return null;
     }
@@ -363,13 +399,6 @@ export function FlowProvider({ children }: { children: ReactNode }) {
     setIsAnonymous(true);
   }, []);
 
-  const consumeCredit = useCallback(async () => {
-    const { data } = await supabase.rpc('consume_credit');
-    if (data === null || data === undefined) return false;
-    setCredits(data);
-    return true;
-  }, []);
-
   // Purchased credits are granted server-side by the revenuecat-webhook Edge
   // Function once RevenueCat confirms the purchase — the client never tells
   // the server how many credits to add. This just re-reads the balance after
@@ -381,6 +410,7 @@ export function FlowProvider({ children }: { children: ReactNode }) {
   }, [appleUserId, fetchCredits, credits]);
 
   const resetFlow = useCallback(() => {
+    printRequestIdRef.current = null;
     setPhotoUri(null);
     setPhotoWidth(0);
     setPhotoHeight(0);
@@ -417,7 +447,6 @@ export function FlowProvider({ children }: { children: ReactNode }) {
       signIn,
       signOut,
       credits,
-      consumeCredit,
       refreshCredits,
       resetFlow,
     }),
@@ -445,7 +474,6 @@ export function FlowProvider({ children }: { children: ReactNode }) {
       signIn,
       signOut,
       credits,
-      consumeCredit,
       refreshCredits,
       resetFlow,
     ],

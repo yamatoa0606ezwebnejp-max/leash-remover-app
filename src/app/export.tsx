@@ -11,6 +11,7 @@ import { ThemedView } from '@/components/themed-view';
 import { Button } from '@/components/ui/button';
 import { MaxContentWidth, Radius, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
+import { InsufficientCreditsError } from '@/lib/leash-api';
 import { useFlow } from '@/state/flow-context';
 
 const PRINT_PRESETS = [
@@ -30,7 +31,7 @@ function extensionForContentType(contentType: string) {
 export default function ExportScreen() {
   const router = useRouter();
   const theme = useTheme();
-  const { isSignedIn, credits, consumeCredit, runPrintRender, removalResult } = useFlow();
+  const { isSignedIn, credits, runPrintRender, removalResult } = useFlow();
   const [preset, setPreset] = useState<(typeof PRINT_PRESETS)[number]['id']>('square');
   const [isExportingStandard, setIsExportingStandard] = useState(false);
   const [isExportingPrint, setIsExportingPrint] = useState(false);
@@ -83,32 +84,34 @@ export default function ExportScreen() {
     }
     setIsExportingPrint(true);
     try {
-      // Render at print resolution first, and only spend a credit once the
-      // server confirms it succeeded — see leash-remover-api's docs/api.md:
-      // "the client must not charge a credit" on a failed render.
-      const result = await runPrintRender();
+      // /v2/render (export=print) charges the credit server-side, atomically
+      // with the render — it either returns the image and charges once, or
+      // does neither (see leash-remover-api's docs/api.md). There's no
+      // separate client-side consume step: a successful result was charged.
+      let result;
+      try {
+        result = await runPrintRender();
+      } catch (error) {
+        if (error instanceof InsufficientCreditsError) {
+          router.push('/purchase');
+          return;
+        }
+        throw error;
+      }
       if (!result) {
         Alert.alert('Export failed', 'The photo could not be processed. Please try again.');
         return;
       }
-      const charged = await consumeCredit();
       try {
         const saved = await saveToCameraRoll(result.imageBase64, result.contentType);
         if (saved) {
-          Alert.alert(
-            'Exported',
-            charged
-              ? 'Your print export was saved to Photos. 1 credit was used.'
-              : 'Your print export was saved to Photos.',
-          );
+          Alert.alert('Exported', 'Your print export was saved to Photos. 1 credit was used.');
         }
       } catch (error) {
         console.warn('saveToCameraRoll (print) failed', error);
         Alert.alert(
           'Save failed',
-          charged
-            ? 'The export rendered and your credit was used, but saving to Photos failed. Please try again.'
-            : 'The export rendered, but saving to Photos failed. Please try again.',
+          'The export rendered and your credit was used, but saving to Photos failed. Please try again.',
         );
       }
     } finally {
