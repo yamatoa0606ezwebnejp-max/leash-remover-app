@@ -40,6 +40,7 @@
   "devDependencies": {
     "@types/react": "~19.2.2",
     "babel-plugin-transform-remove-console": "^6.9.4",
+    "eas-cli": "^23.2.0",
     "eslint": "^9.0.0",
     "eslint-config-expo": "~57.0.1",
     "typescript": "~6.0.3"
