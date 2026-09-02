@@ -1,17 +1,20 @@
 import * as ImagePicker from 'expo-image-picker';
 import { Redirect, useRouter } from 'expo-router';
-import { Alert, StyleSheet, View } from 'react-native';
+import { SymbolView } from 'expo-symbols';
+import { Alert, Pressable, StyleSheet, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { Button } from '@/components/ui/button';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { MaxContentWidth, Spacing } from '@/constants/theme';
+import { useTheme } from '@/hooks/use-theme';
 import { isLeashApiConfigured, warmLeashApi } from '@/lib/leash-api';
 import { useFlow } from '@/state/flow-context';
 
 export default function PhotoSelectScreen() {
   const router = useRouter();
+  const theme = useTheme();
   const { hasSeenOnboarding, pickPhoto } = useFlow();
 
   if (!hasSeenOnboarding) {
@@ -49,6 +52,17 @@ export default function PhotoSelectScreen() {
   return (
     <ThemedView style={styles.container}>
       <SafeAreaView style={styles.safeArea}>
+        <Pressable
+          onPress={() => router.push('/settings')}
+          hitSlop={12}
+          style={({ pressed }) => [styles.settingsButton, { opacity: pressed ? 0.6 : 1 }]}>
+          <SymbolView
+            name={{ ios: 'gearshape', android: 'settings', web: 'settings' }}
+            tintColor={theme.textSecondary}
+            size={22}
+          />
+        </Pressable>
+
         <View style={styles.hero}>
           <ThemedText type="title" style={styles.centerText}>
             LeashOff
@@ -81,6 +95,15 @@ const styles = StyleSheet.create({
     paddingHorizontal: Spacing.four,
     justifyContent: 'center',
     gap: Spacing.six,
+  },
+  settingsButton: {
+    position: 'absolute',
+    top: Spacing.four,
+    right: Spacing.four,
+    width: 32,
+    height: 32,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   hero: {
     gap: Spacing.three,

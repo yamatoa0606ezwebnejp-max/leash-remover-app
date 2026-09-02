@@ -10,11 +10,6 @@ import { ThemedView } from '@/components/themed-view';
 import { MaxContentWidth, Spacing } from '@/constants/theme';
 import { useFlow } from '@/state/flow-context';
 
-// TODO(App Review, Guideline 5.1.1(v)): once a backend/account exists behind
-// this sign-in, add an in-app account deletion flow (planned home: the
-// future Settings screen referenced in onboarding.tsx). Nothing to delete
-// yet since there's no persisted account data, but flag before submission.
-
 export default function SignInScreen() {
   const router = useRouter();
   const { signIn } = useFlow();

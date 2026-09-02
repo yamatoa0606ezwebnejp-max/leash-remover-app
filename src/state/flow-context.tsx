@@ -122,6 +122,12 @@ type FlowState = {
   isSignedIn: boolean;
   signIn: (identityToken: string, rawNonce: string) => Promise<void>;
   signOut: () => Promise<void>;
+  // App Store Review Guideline 5.1.1(v): deletes the account server-side
+  // (supabase/functions/delete-account) and its credits/purchase history
+  // with it, then drops back into a fresh anonymous session, same as
+  // signOut. Throws on failure — the caller (settings.tsx) is responsible
+  // for surfacing that to the user rather than silently no-op'ing.
+  deleteAccount: () => Promise<void>;
 
   credits: number;
   refreshCredits: () => Promise<number>;
@@ -399,6 +405,27 @@ export function FlowProvider({ children }: { children: ReactNode }) {
     setIsAnonymous(true);
   }, []);
 
+  const deleteAccount = useCallback(async () => {
+    const { error } = await supabase.functions.invoke('delete-account', { method: 'POST' });
+    if (error) throw error;
+
+    await unlinkPurchasesIdentity();
+    setCredits(0);
+    // The account is already gone server-side, so there's nothing left to
+    // sign out of remotely — just clear the now-stale local session, then
+    // drop back into a fresh anonymous one, same as signOut.
+    await supabase.auth.signOut({ scope: 'local' });
+    const { data, error: anonError } = await supabase.auth.signInAnonymously();
+    if (anonError) {
+      console.warn('signInAnonymously (post delete) failed', anonError);
+      setAppleUserId(null);
+      setIsAnonymous(true);
+      return;
+    }
+    setAppleUserId(data.user?.id ?? null);
+    setIsAnonymous(true);
+  }, []);
+
   // Purchased credits are granted server-side by the revenuecat-webhook Edge
   // Function once RevenueCat confirms the purchase — the client never tells
   // the server how many credits to add. This just re-reads the balance after
@@ -446,6 +473,7 @@ export function FlowProvider({ children }: { children: ReactNode }) {
       isSignedIn: appleUserId !== null && !isAnonymous,
       signIn,
       signOut,
+      deleteAccount,
       credits,
       refreshCredits,
       resetFlow,
@@ -473,6 +501,7 @@ export function FlowProvider({ children }: { children: ReactNode }) {
       isAnonymous,
       signIn,
       signOut,
+      deleteAccount,
       credits,
       refreshCredits,
       resetFlow,
