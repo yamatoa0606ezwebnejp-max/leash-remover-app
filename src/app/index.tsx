@@ -2,7 +2,7 @@ import * as ImagePicker from 'expo-image-picker';
 import { Redirect, useRouter } from 'expo-router';
 import { SymbolView } from 'expo-symbols';
 import { Alert, Pressable, StyleSheet, View } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { Button } from '@/components/ui/button';
 import { ThemedText } from '@/components/themed-text';
@@ -15,6 +15,7 @@ import { useFlow } from '@/state/flow-context';
 export default function PhotoSelectScreen() {
   const router = useRouter();
   const theme = useTheme();
+  const insets = useSafeAreaInsets();
   const { hasSeenOnboarding, pickPhoto } = useFlow();
 
   if (!hasSeenOnboarding) {
@@ -55,7 +56,15 @@ export default function PhotoSelectScreen() {
         <Pressable
           onPress={() => router.push('/settings')}
           hitSlop={12}
-          style={({ pressed }) => [styles.settingsButton, { opacity: pressed ? 0.6 : 1 }]}>
+          style={({ pressed }) => [
+            styles.settingsButton,
+            // Absolutely positioned children ignore SafeAreaView's own
+            // padding in RN's layout engine, so without adding insets.top
+            // here this button renders under the notch/Dynamic Island on
+            // devices with a large top inset (TestFlight feedback: gear
+            // icon overlapping the status bar).
+            { top: insets.top + Spacing.four, opacity: pressed ? 0.6 : 1 },
+          ]}>
           <SymbolView
             name={{ ios: 'gearshape', android: 'settings', web: 'settings' }}
             tintColor={theme.textSecondary}
@@ -98,7 +107,6 @@ const styles = StyleSheet.create({
   },
   settingsButton: {
     position: 'absolute',
-    top: Spacing.four,
     right: Spacing.four,
     width: 32,
     height: 32,

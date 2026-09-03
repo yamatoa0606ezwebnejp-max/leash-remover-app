@@ -62,6 +62,7 @@ export default function CorrectScreen() {
     addTapAt,
     removeTap,
     isPreviewLoading,
+    previewError,
     anyAccepted,
     dogDetected,
     coverageComplete,
@@ -98,7 +99,12 @@ export default function CorrectScreen() {
               Tap the leash in the photo (up to {MAX_TAP_POINTS} points)
             </ThemedText>
           )}
-          {lastRejected && (
+          {previewError && (
+            <ThemedText type="small" style={[styles.centerText, { color: theme.danger }]}>
+              {previewError}
+            </ThemedText>
+          )}
+          {!previewError && lastRejected && (
             <ThemedText type="small" style={[styles.centerText, { color: theme.danger }]}>
               {REASON_HINTS[lastRejected.reason ?? 'no_mask']}
             </ThemedText>

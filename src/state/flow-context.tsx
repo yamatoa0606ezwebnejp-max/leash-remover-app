@@ -83,6 +83,10 @@ type FlowState = {
   addTapAt: (xNorm: number, yNorm: number) => void;
   removeTap: (id: string) => void;
   isPreviewLoading: boolean;
+  // Set when the last /v2/taps call itself failed (network/cold-start/5xx),
+  // as opposed to a tap being scored and rejected by the server. Cleared at
+  // the start of the next attempt. See refreshPreview below.
+  previewError: string | null;
   anyAccepted: boolean;
   dogDetected: boolean | null;
   coverageComplete: boolean;
@@ -145,6 +149,7 @@ export function FlowProvider({ children }: { children: ReactNode }) {
 
   const [tapPoints, setTapPoints] = useState<TapPoint[]>([]);
   const [isPreviewLoading, setIsPreviewLoading] = useState(false);
+  const [previewError, setPreviewError] = useState<string | null>(null);
   const [anyAccepted, setAnyAccepted] = useState(false);
   const [dogDetected, setDogDetected] = useState<boolean | null>(null);
   const [coverageComplete, setCoverageComplete] = useState(false);
@@ -218,6 +223,7 @@ export function FlowProvider({ children }: { children: ReactNode }) {
     setDogDetected(null);
     setCoverageComplete(false);
     setContinueAtNorm([]);
+    setPreviewError(null);
     setRemovalResult(null);
   }, []);
 
@@ -228,9 +234,11 @@ export function FlowProvider({ children }: { children: ReactNode }) {
         setDogDetected(null);
         setCoverageComplete(false);
         setContinueAtNorm([]);
+        setPreviewError(null);
         return;
       }
       setIsPreviewLoading(true);
+      setPreviewError(null);
       try {
         const response = await previewLeashTaps(
           { uri: photoUri },
@@ -256,6 +264,18 @@ export function FlowProvider({ children }: { children: ReactNode }) {
         );
       } catch (error) {
         console.warn('previewLeashTaps failed', error);
+        // Without this, a failed request leaves this attempt's taps stuck in
+        // 'pending' forever (spinner never resolves) and anyAccepted never
+        // flips true, so "Remove Leash" stays disabled with no explanation —
+        // reported via TestFlight as the tap screen "not progressing".
+        setPreviewError('Could not check that tap. Remove it and try again.');
+        setTapPoints((current) =>
+          current.map((point) =>
+            point.status === 'pending' && points.some((p) => p.id === point.id)
+              ? { ...point, status: 'rejected', reason: null }
+              : point,
+          ),
+        );
       } finally {
         setIsPreviewLoading(false);
       }
@@ -446,6 +466,7 @@ export function FlowProvider({ children }: { children: ReactNode }) {
     setDogDetected(null);
     setCoverageComplete(false);
     setContinueAtNorm([]);
+    setPreviewError(null);
     setRemovalResult(null);
   }, []);
 
@@ -461,6 +482,7 @@ export function FlowProvider({ children }: { children: ReactNode }) {
       addTapAt,
       removeTap,
       isPreviewLoading,
+      previewError,
       anyAccepted,
       dogDetected,
       coverageComplete,
@@ -489,6 +511,7 @@ export function FlowProvider({ children }: { children: ReactNode }) {
       addTapAt,
       removeTap,
       isPreviewLoading,
+      previewError,
       anyAccepted,
       dogDetected,
       coverageComplete,
