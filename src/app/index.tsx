@@ -9,7 +9,6 @@ import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { MaxContentWidth, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
-import { isLeashApiConfigured, warmLeashApi } from '@/lib/leash-api';
 import { useFlow } from '@/state/flow-context';
 
 export default function PhotoSelectScreen() {
@@ -27,14 +26,6 @@ export default function PhotoSelectScreen() {
     if (!permission.granted) {
       Alert.alert('Photo access needed', 'Please allow access to your photo library in Settings.');
       return;
-    }
-
-    // Fire-and-forget: buys back most of the ~34s cold start (see
-    // leash-remover-api's docs/api.md) while the user is still picking and
-    // tapping. Not awaited — a failure here just means the first real call
-    // pays the full cold start instead.
-    if (isLeashApiConfigured()) {
-      warmLeashApi().catch(() => {});
     }
 
     const result = await ImagePicker.launchImageLibraryAsync({

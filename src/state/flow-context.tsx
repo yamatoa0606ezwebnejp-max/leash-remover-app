@@ -11,8 +11,10 @@ import {
 import * as Crypto from 'expo-crypto';
 
 import {
+  isLeashApiConfigured,
   previewLeashTaps,
   renderLeashRemoval,
+  warmLeashApi,
   InsufficientCreditsError,
   type Point,
   type TapPreview,
@@ -169,6 +171,12 @@ export function FlowProvider({ children }: { children: ReactNode }) {
   // photo. A ref, not state: it must not survive across export attempts by
   // accident, but changing it should never itself trigger a re-render.
   const printRequestIdRef = useRef<string | null>(null);
+  // Set on the first tap of a photo so the warm call below fires at most
+  // once per photo. Deliberately not fired at picker-open time (index.tsx) —
+  // Daisuke's Cloud Run billing data showed ~half of those warms were wasted
+  // (user cancels the picker or abandons the photo before tapping), so this
+  // waits for a much stronger signal of intent to actually process it.
+  const hasWarmedApiRef = useRef(false);
 
   const fetchCredits = useCallback(async (userId: string) => {
     const { data } = await supabase.from('credits').select('balance').eq('user_id', userId).maybeSingle();
@@ -215,6 +223,7 @@ export function FlowProvider({ children }: { children: ReactNode }) {
 
   const pickPhoto = useCallback((uri: string, width: number, height: number) => {
     printRequestIdRef.current = null;
+    hasWarmedApiRef.current = false;
     setPhotoUri(uri);
     setPhotoWidth(width);
     setPhotoHeight(height);
@@ -297,6 +306,10 @@ export function FlowProvider({ children }: { children: ReactNode }) {
   }, [tapIdsKey]);
 
   const addTapAt = useCallback((xNorm: number, yNorm: number) => {
+    if (!hasWarmedApiRef.current && isLeashApiConfigured()) {
+      hasWarmedApiRef.current = true;
+      warmLeashApi().catch(() => {});
+    }
     setTapPoints((current) => {
       if (current.length >= MAX_TAP_POINTS) return current;
       return [
@@ -458,6 +471,7 @@ export function FlowProvider({ children }: { children: ReactNode }) {
 
   const resetFlow = useCallback(() => {
     printRequestIdRef.current = null;
+    hasWarmedApiRef.current = false;
     setPhotoUri(null);
     setPhotoWidth(0);
     setPhotoHeight(0);
