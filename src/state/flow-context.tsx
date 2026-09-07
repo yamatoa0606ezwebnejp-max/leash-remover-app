@@ -162,6 +162,15 @@ export function FlowProvider({ children }: { children: ReactNode }) {
   const [userId, setUserId] = useState<string | null>(null);
   const [isAnonymous, setIsAnonymous] = useState(true);
   const [credits, setCredits] = useState(0);
+  // Mirrors `credits` for fetchCredits' error path below, which needs to
+  // read the current balance without depending on it — depending on
+  // `credits` directly would change fetchCredits' identity every time it
+  // *succeeds* (since it just called setCredits), re-triggering every
+  // effect/callback that lists fetchCredits as a dependency.
+  const creditsRef = useRef(0);
+  useEffect(() => {
+    creditsRef.current = credits;
+  }, [credits]);
 
   // The request_id for the print export currently in flight/last-failed —
   // stable across a manual retry of the *same* attempt (renderLeashRemoval
@@ -171,8 +180,16 @@ export function FlowProvider({ children }: { children: ReactNode }) {
   // accident, but changing it should never itself trigger a re-render.
   const printRequestIdRef = useRef<string | null>(null);
 
-  const fetchCredits = useCallback(async (userId: string) => {
-    const { data } = await supabase.from('credits').select('balance').eq('user_id', userId).maybeSingle();
+  const fetchCredits = useCallback(async (uid: string) => {
+    const { data, error } = await supabase.from('credits').select('balance').eq('user_id', uid).maybeSingle();
+    if (error) {
+      // Leave the existing balance alone on a failed read — this is the
+      // fallback signIn() reaches for when claim_free_credit itself fails,
+      // so defaulting to 0 here would reintroduce the exact bug that
+      // fallback exists to avoid, just one layer deeper.
+      console.warn('fetchCredits failed', error);
+      return creditsRef.current;
+    }
     const balance = data?.balance ?? 0;
     setCredits(balance);
     return balance;
@@ -195,8 +212,10 @@ export function FlowProvider({ children }: { children: ReactNode }) {
       // repo's first release, but installs from before that migration can
       // still have a real, usable refresh token sitting in AsyncStorage's
       // plaintext file. Nothing reads from AsyncStorage anymore, so clearing
-      // it is safe — this just closes the leftover exposure.
-      await AsyncStorage.clear();
+      // it is safe — this just closes the leftover exposure. Fire-and-forget
+      // and swallow any failure: this is housekeeping, not something that
+      // should ever block or break establishing the real (Keychain) session.
+      AsyncStorage.clear().catch((error) => console.warn('AsyncStorage.clear failed', error));
       const { data } = await supabase.auth.getSession();
       let session = data.session;
       if (!session) {
