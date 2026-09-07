@@ -132,12 +132,14 @@ export async function previewLeashTaps(photo: PhotoInput, points: Point[]): Prom
 export async function renderLeashRemoval(
   photo: PhotoInput,
   points: Point[],
-  // requestId is required for a print export: it makes the server-side
-  // charge idempotent, but only if the *caller* keeps it stable across a
-  // manual retry of the same export attempt (e.g. the user tapping "Export"
-  // again after a lost response) — see flow-context.tsx's runPrintRender,
-  // which owns that lifetime. Generating a fresh id per call here would
-  // silently defeat the whole point and risk double-charging a credit.
+  // requestId makes the server-side charge idempotent, but only if the
+  // *caller* keeps it stable across retries of the same paid attempt — see
+  // flow-context.tsx's runPrintRender/runRemoval, which own that lifetime.
+  // Generating a fresh id per call here would silently defeat the whole
+  // point and risk double-charging a credit. Required for export=print
+  // (already charged server-side today); optional for export=standard,
+  // sent whenever the caller supplies one so the server can start charging
+  // that path once it's ready to, without a client change needed first.
   options: { export: RenderExport; lossless?: boolean; requestId?: string },
 ): Promise<RenderResult> {
   const url = requireApiUrl();
@@ -146,8 +148,10 @@ export async function renderLeashRemoval(
   form.append('points', JSON.stringify(points));
   form.append('export', options.export);
   form.append('lossless', options.lossless ? 'true' : 'false');
-  if (options.export === 'print') {
-    if (!options.requestId) throw new Error('renderLeashRemoval: requestId is required for export=print');
+  if (options.export === 'print' && !options.requestId) {
+    throw new Error('renderLeashRemoval: requestId is required for export=print');
+  }
+  if (options.requestId) {
     form.append('request_id', options.requestId);
   }
 

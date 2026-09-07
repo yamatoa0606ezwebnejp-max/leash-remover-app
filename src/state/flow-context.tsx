@@ -179,6 +179,17 @@ export function FlowProvider({ children }: { children: ReactNode }) {
   // photo. A ref, not state: it must not survive across export attempts by
   // accident, but changing it should never itself trigger a re-render.
   const printRequestIdRef = useRef<string | null>(null);
+  // Same idea, but scoped per-*photo* rather than per-attempt: generated
+  // once when a photo is picked, then reused across every runRemoval() call
+  // on that photo regardless of success or failure — never cleared on
+  // success like printRequestIdRef is. This is what will let the server
+  // charge runRemoval() exactly once per photo (unlimited free tap/rerun
+  // attempts) once leash-remover-api starts charging export=standard —
+  // the billing-v2 redesign's agreed charge point. Inert today: the server
+  // doesn't charge standard renders yet, so this just rides along unused
+  // until it does. Deliberately shipped ahead of that server change so the
+  // server-side flip doesn't also require a client release to land safely.
+  const standardRequestIdRef = useRef<string | null>(null);
 
   const fetchCredits = useCallback(async (uid: string) => {
     const { data, error } = await supabase.from('credits').select('balance').eq('user_id', uid).maybeSingle();
@@ -241,6 +252,7 @@ export function FlowProvider({ children }: { children: ReactNode }) {
 
   const pickPhoto = useCallback((uri: string, width: number, height: number) => {
     printRequestIdRef.current = null;
+    standardRequestIdRef.current = null;
     setPhotoUri(uri);
     setPhotoWidth(width);
     setPhotoHeight(height);
@@ -346,11 +358,14 @@ export function FlowProvider({ children }: { children: ReactNode }) {
     if (!photoUri) return false;
     setIsRemoving(true);
     try {
+      if (!standardRequestIdRef.current) {
+        standardRequestIdRef.current = Crypto.randomUUID();
+      }
       const accepted = tapPoints.filter((point) => point.status === 'accepted');
       const result = await renderLeashRemoval(
         { uri: photoUri },
         toPixelPoints(accepted, photoWidth, photoHeight),
-        { export: 'standard', lossless: false },
+        { export: 'standard', lossless: false, requestId: standardRequestIdRef.current },
       );
       if (!result.succeeded) return false;
       setRemovalResult({ imageBase64: result.image, contentType: result.content_type });
@@ -493,6 +508,7 @@ export function FlowProvider({ children }: { children: ReactNode }) {
 
   const resetFlow = useCallback(() => {
     printRequestIdRef.current = null;
+    standardRequestIdRef.current = null;
     setPhotoUri(null);
     setPhotoWidth(0);
     setPhotoHeight(0);
