@@ -9,6 +9,7 @@ import {
   type ReactNode,
 } from 'react';
 import * as Crypto from 'expo-crypto';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 import {
   previewLeashTaps,
@@ -122,7 +123,7 @@ type FlowState = {
   // the account server-side, keyed on RevenueCat's app_user_id (== this
   // Supabase user id, see linkPurchasesIdentity below). The client cannot
   // grant itself credits directly anymore.
-  appleUserId: string | null;
+  userId: string | null;
   isSignedIn: boolean;
   signIn: (identityToken: string, rawNonce: string) => Promise<void>;
   signOut: () => Promise<void>;
@@ -158,7 +159,7 @@ export function FlowProvider({ children }: { children: ReactNode }) {
   const [isRemoving, setIsRemoving] = useState(false);
   const [removalResult, setRemovalResult] = useState<RemovalResult | null>(null);
 
-  const [appleUserId, setAppleUserId] = useState<string | null>(null);
+  const [userId, setUserId] = useState<string | null>(null);
   const [isAnonymous, setIsAnonymous] = useState(true);
   const [credits, setCredits] = useState(0);
 
@@ -190,6 +191,12 @@ export function FlowProvider({ children }: { children: ReactNode }) {
   // sign-in wall (App Store Review Guideline 5.1.1(v)).
   useEffect(() => {
     async function bootstrap() {
+      // The session moved to the Keychain (secure-storage.ts) before this
+      // repo's first release, but installs from before that migration can
+      // still have a real, usable refresh token sitting in AsyncStorage's
+      // plaintext file. Nothing reads from AsyncStorage anymore, so clearing
+      // it is safe — this just closes the leftover exposure.
+      await AsyncStorage.clear();
       const { data } = await supabase.auth.getSession();
       let session = data.session;
       if (!session) {
@@ -201,7 +208,7 @@ export function FlowProvider({ children }: { children: ReactNode }) {
         session = anon.session;
       }
       const user = session?.user ?? null;
-      setAppleUserId(user?.id ?? null);
+      setUserId(user?.id ?? null);
       setIsAnonymous(user?.is_anonymous ?? true);
       if (user && !user.is_anonymous) {
         fetchCredits(user.id);
@@ -401,12 +408,21 @@ export function FlowProvider({ children }: { children: ReactNode }) {
     }
     if (error || !data.user) throw error ?? new Error('Sign in with Apple returned no user');
 
-    setAppleUserId(data.user.id);
+    setUserId(data.user.id);
     setIsAnonymous(false);
     await linkPurchasesIdentity(data.user.id);
-    const { data: balance } = await supabase.rpc('claim_free_credit');
-    setCredits(balance ?? 0);
-  }, []);
+    const { data: balance, error: creditError } = await supabase.rpc('claim_free_credit');
+    if (creditError) {
+      // The free-credit claim failing doesn't mean the balance is 0 — this
+      // user may be a reinstall with existing credits. Falling back to
+      // balance ?? 0 here sent people with real credits straight to the
+      // purchase screen (leash-remover-api review, 2026-08-28).
+      console.warn('claim_free_credit failed', creditError);
+      await fetchCredits(data.user.id);
+    } else {
+      setCredits(balance ?? 0);
+    }
+  }, [fetchCredits]);
 
   const signOut = useCallback(async () => {
     await supabase.auth.signOut();
@@ -417,11 +433,11 @@ export function FlowProvider({ children }: { children: ReactNode }) {
     const { data, error } = await supabase.auth.signInAnonymously();
     if (error) {
       console.warn('signInAnonymously (post sign-out) failed', error);
-      setAppleUserId(null);
+      setUserId(null);
       setIsAnonymous(true);
       return;
     }
-    setAppleUserId(data.user?.id ?? null);
+    setUserId(data.user?.id ?? null);
     setIsAnonymous(true);
   }, []);
 
@@ -438,11 +454,11 @@ export function FlowProvider({ children }: { children: ReactNode }) {
     const { data, error: anonError } = await supabase.auth.signInAnonymously();
     if (anonError) {
       console.warn('signInAnonymously (post delete) failed', anonError);
-      setAppleUserId(null);
+      setUserId(null);
       setIsAnonymous(true);
       return;
     }
-    setAppleUserId(data.user?.id ?? null);
+    setUserId(data.user?.id ?? null);
     setIsAnonymous(true);
   }, []);
 
@@ -452,9 +468,9 @@ export function FlowProvider({ children }: { children: ReactNode }) {
   // a purchase completes (the webhook may land a moment after the App Store
   // sheet closes, so callers should retry a few times).
   const refreshCredits = useCallback(async () => {
-    if (!appleUserId) return credits;
-    return fetchCredits(appleUserId);
-  }, [appleUserId, fetchCredits, credits]);
+    if (!userId) return credits;
+    return fetchCredits(userId);
+  }, [userId, fetchCredits, credits]);
 
   const resetFlow = useCallback(() => {
     printRequestIdRef.current = null;
@@ -491,8 +507,8 @@ export function FlowProvider({ children }: { children: ReactNode }) {
       removalResult,
       runRemoval,
       runPrintRender,
-      appleUserId,
-      isSignedIn: appleUserId !== null && !isAnonymous,
+      userId,
+      isSignedIn: userId !== null && !isAnonymous,
       signIn,
       signOut,
       deleteAccount,
@@ -520,7 +536,7 @@ export function FlowProvider({ children }: { children: ReactNode }) {
       removalResult,
       runRemoval,
       runPrintRender,
-      appleUserId,
+      userId,
       isAnonymous,
       signIn,
       signOut,
