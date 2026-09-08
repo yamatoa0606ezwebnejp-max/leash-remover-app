@@ -15,7 +15,7 @@ export default function PhotoSelectScreen() {
   const router = useRouter();
   const theme = useTheme();
   const insets = useSafeAreaInsets();
-  const { hasSeenOnboarding, pickPhoto } = useFlow();
+  const { hasSeenOnboarding, pickPhoto, credits } = useFlow();
 
   if (!hasSeenOnboarding) {
     return <Redirect href="/onboarding" />;
@@ -44,6 +44,18 @@ export default function PhotoSelectScreen() {
   return (
     <ThemedView style={styles.container}>
       <SafeAreaView style={styles.safeArea}>
+        <Pressable
+          onPress={() => router.push('/purchase')}
+          hitSlop={12}
+          style={({ pressed }) => [
+            styles.creditsButton,
+            { top: insets.top + Spacing.four, opacity: pressed ? 0.6 : 1 },
+          ]}>
+          <ThemedText type="small" themeColor="textSecondary">
+            {credits} credit{credits === 1 ? '' : 's'}
+          </ThemedText>
+        </Pressable>
+
         <Pressable
           onPress={() => router.push('/settings')}
           hitSlop={12}
@@ -102,6 +114,12 @@ const styles = StyleSheet.create({
     width: 32,
     height: 32,
     alignItems: 'center',
+    justifyContent: 'center',
+  },
+  creditsButton: {
+    position: 'absolute',
+    left: Spacing.four,
+    height: 32,
     justifyContent: 'center',
   },
   hero: {
