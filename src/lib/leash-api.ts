@@ -40,10 +40,14 @@ async function authHeaders(): Promise<HeadersInit> {
   return token ? { Authorization: `Bearer ${token}` } : {};
 }
 
-/** Thrown for /v2/render export=print's 402: no credit, send the user to purchase. */
+/**
+ * Thrown for /v2/render's 402, either export: no credit, or an anonymous
+ * identity tried to spend one. The caller should route to sign-in or the
+ * purchase screen rather than treating this as a render/detection failure.
+ */
 export class InsufficientCreditsError extends Error {
   constructor() {
-    super('No print credit available');
+    super('No credit available');
   }
 }
 
@@ -76,10 +80,10 @@ export type RenderResult =
       elapsed_ms: Record<string, number>;
       coverage_complete: boolean;
       continue_at: Point[];
-      // Set only on a print export — what's left after this render's
-      // charge. null (not zero) on a standard export, where nothing was
+      // What's left after this render's charge — print always, standard too
+      // since billing-v2 (2026-09-06). null (not zero) whenever nothing was
       // charged or looked up — the server sends the key with a null value
-      // rather than omitting it, despite what docs/api.md says.
+      // rather than omitting it.
       credit_balance?: number | null;
     }
   | {

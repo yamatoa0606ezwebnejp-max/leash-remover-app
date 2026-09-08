@@ -67,7 +67,26 @@ export default function CorrectScreen() {
     dogDetected,
     coverageComplete,
     continueAtNorm,
+    isSignedIn,
+    credits,
   } = useFlow();
+
+  // Billing-v2 (2026-09-06): runRemoval() now charges a credit server-side,
+  // same as print — an anonymous identity can't spend one at all (main.py's
+  // _require_a_named_person), and 0 credits can't either way. Checked here,
+  // before /processing, rather than letting the 402 surface mid-spinner —
+  // same proactive check export.tsx already does for the print export.
+  function handleRemovePress() {
+    if (!isSignedIn) {
+      router.push('/sign-in');
+      return;
+    }
+    if (credits <= 0) {
+      router.push('/purchase');
+      return;
+    }
+    router.push('/processing');
+  }
 
   const acceptedCount = tapPoints.filter((point) => point.status === 'accepted').length;
   const atMax = tapPoints.length >= MAX_TAP_POINTS;
@@ -131,9 +150,9 @@ export default function CorrectScreen() {
             {isPreviewLoading ? 'Checking…' : `${acceptedCount} point(s) marked for removal`}
           </ThemedText>
           <Button
-            title="Remove Leash"
+            title={isSignedIn ? 'Remove Leash' : 'Sign In to Remove the Leash'}
             disabled={!anyAccepted || isPreviewLoading}
-            onPress={() => router.push('/processing')}
+            onPress={handleRemovePress}
           />
         </View>
       </SafeAreaView>

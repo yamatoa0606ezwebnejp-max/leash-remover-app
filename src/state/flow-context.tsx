@@ -95,8 +95,12 @@ type FlowState = {
 
   isRemoving: boolean;
   removalResult: RemovalResult | null;
-  // F-05: renders at "standard" resolution, which doubles as the free F-07
-  // export — see export.tsx. Returns whether it succeeded (F-10 on false).
+  // Renders at "standard" resolution, which the standard export in
+  // export.tsx then saves locally with no further server call. Billing-v2
+  // (2026-09-06): charged server-side same as print, via standardRequestIdRef
+  // (per-photo, not per-attempt — free retries on the same photo). Returns
+  // whether it succeeded (F-10 on false); throws InsufficientCreditsError on
+  // the server's 402, same split as runPrintRender below.
   runRemoval: () => Promise<boolean>;
   // F-08: a fresh "print" resolution render, called only once a credit is
   // confirmed available. /v2/render (export=print) charges atomically
@@ -369,8 +373,16 @@ export function FlowProvider({ children }: { children: ReactNode }) {
       );
       if (!result.succeeded) return false;
       setRemovalResult({ imageBase64: result.image, contentType: result.content_type });
+      // Same guard as runPrintRender: the server sends this as null, not an
+      // omitted key, whenever nothing was charged. Only writes it when it's
+      // an actual number so a null here can't be mistaken for "0 credits".
+      if (typeof result.credit_balance === 'number') setCredits(result.credit_balance);
       return true;
     } catch (error) {
+      // Let the caller (processing.tsx) send the user to sign-in or the
+      // purchase screen on a 402 rather than showing it as a detection
+      // failure — see export.tsx's runPrintRender for the same split.
+      if (error instanceof InsufficientCreditsError) throw error;
       console.warn('renderLeashRemoval (standard) failed', error);
       return false;
     } finally {

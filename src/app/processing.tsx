@@ -7,6 +7,7 @@ import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { MaxContentWidth, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
+import { InsufficientCreditsError } from '@/lib/leash-api';
 import { useFlow } from '@/state/flow-context';
 
 export default function ProcessingScreen() {
@@ -16,10 +17,24 @@ export default function ProcessingScreen() {
 
   useEffect(() => {
     let cancelled = false;
-    runRemoval().then((succeeded) => {
-      if (cancelled) return;
-      router.replace(succeeded ? '/compare' : '/detect-failed');
-    });
+    runRemoval()
+      .then((succeeded) => {
+        if (cancelled) return;
+        router.replace(succeeded ? '/compare' : '/detect-failed');
+      })
+      .catch((error) => {
+        if (cancelled) return;
+        // correct.tsx already keeps a signed-out or out-of-credit user from
+        // reaching this screen, so this is the race-condition fallback (the
+        // balance or session changed between that check and this call) —
+        // same 402 the print path handles in export.tsx.
+        if (error instanceof InsufficientCreditsError) {
+          router.replace('/purchase');
+          return;
+        }
+        console.warn('runRemoval failed unexpectedly', error);
+        router.replace('/detect-failed');
+      });
     return () => {
       cancelled = true;
     };

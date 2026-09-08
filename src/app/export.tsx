@@ -60,8 +60,9 @@ export default function ExportScreen() {
   }
 
   async function handleStandardExport() {
-    // The F-05 render already produced this image at standard resolution —
-    // this is that same result, not a fresh server call.
+    // runRemoval() already produced this image at standard resolution (and,
+    // since billing-v2, already charged for it) — this is a local save of
+    // that same result, not a fresh server call, so it's free either way.
     if (!removalResult) return;
     setIsExportingStandard(true);
     try {
