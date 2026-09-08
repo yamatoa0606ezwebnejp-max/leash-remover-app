@@ -45,3 +45,6 @@ example
 
 # Supabase CLI local link metadata (includes a DB connection string)
 supabase/.temp/
+
+# Personal Claude Code permission overrides
+.claude/settings.local.json
