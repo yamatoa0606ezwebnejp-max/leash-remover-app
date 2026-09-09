@@ -1,7 +1,7 @@
 import { Image } from 'expo-image';
 import { SymbolView } from 'expo-symbols';
 import { useRouter } from 'expo-router';
-import { useRef } from 'react';
+import { useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Pressable,
@@ -92,6 +92,7 @@ export default function CorrectScreen() {
   const atMax = tapPoints.length >= MAX_TAP_POINTS;
   const lastRejected = [...tapPoints].reverse().find((point) => point.status === 'rejected');
   const aspectRatio = photoWidth > 0 && photoHeight > 0 ? photoWidth / photoHeight : 3 / 4;
+  const [imageArea, setImageArea] = useState({ width: 0, height: 0 });
 
   return (
     <ThemedView style={styles.container}>
@@ -102,15 +103,23 @@ export default function CorrectScreen() {
           onBack={() => router.back()}
         />
 
-        <TapImage
-          photoUri={photoUri}
-          aspectRatio={aspectRatio}
-          tapPoints={tapPoints}
-          continueAtNorm={coverageComplete ? [] : continueAtNorm}
-          atMax={atMax}
-          onTap={addTapAt}
-          onRemoveTap={removeTap}
-        />
+        <View
+          style={styles.imageArea}
+          onLayout={(event) =>
+            setImageArea({ width: event.nativeEvent.layout.width, height: event.nativeEvent.layout.height })
+          }>
+          <TapImage
+            photoUri={photoUri}
+            aspectRatio={aspectRatio}
+            tapPoints={tapPoints}
+            continueAtNorm={coverageComplete ? [] : continueAtNorm}
+            atMax={atMax}
+            onTap={addTapAt}
+            onRemoveTap={removeTap}
+            maxWidth={imageArea.width}
+            maxHeight={imageArea.height}
+          />
+        </View>
 
         <View style={styles.hintArea}>
           {tapPoints.length === 0 && (
@@ -171,6 +180,8 @@ function TapImage({
   atMax,
   onTap,
   onRemoveTap,
+  maxWidth,
+  maxHeight,
 }: {
   photoUri: string | null;
   aspectRatio: number;
@@ -179,9 +190,22 @@ function TapImage({
   atMax: boolean;
   onTap: (xNorm: number, yNorm: number) => void;
   onRemoveTap: (id: string) => void;
+  // The image area's own measured size (correct.tsx's onLayout) — an
+  // unusually tall or wide photo (a panorama, or one already letterboxed by
+  // whatever app saved it) must not size this box past what's actually
+  // available, or it pushes the footer's "Remove Leash" button off-screen
+  // with nothing to scroll it back into view. Bounding by both dimensions
+  // and picking whichever is tighter keeps the box's aspect ratio equal to
+  // the photo's own, which is what keeps tap coordinates (normalized against
+  // this box) mapping correctly onto the un-cropped photo.
+  maxWidth: number;
+  maxHeight: number;
 }) {
   const theme = useTheme();
   const sizeRef = useRef({ width: 1, height: 1 });
+
+  const fitWidth = maxHeight > 0 ? Math.min(maxWidth, maxHeight * aspectRatio) : maxWidth;
+  const fitHeight = fitWidth / aspectRatio;
 
   function handlePress(event: GestureResponderEvent) {
     if (atMax) return;
@@ -196,7 +220,7 @@ function TapImage({
       onLayout={(event) => {
         sizeRef.current = { width: event.nativeEvent.layout.width, height: event.nativeEvent.layout.height };
       }}
-      style={[styles.imageWrapper, { aspectRatio }]}>
+      style={[styles.imageWrapper, { width: fitWidth, height: fitHeight }]}>
       {photoUri && <Image source={{ uri: photoUri }} style={styles.image} contentFit="cover" />}
       {continueAtNorm.map((point, index) => (
         <View
@@ -229,8 +253,13 @@ const styles = StyleSheet.create({
     paddingBottom: Spacing.four,
     gap: Spacing.three,
   },
-  imageWrapper: {
+  imageArea: {
+    flex: 1,
     width: '100%',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  imageWrapper: {
     borderRadius: Radius.large,
     overflow: 'hidden',
   },
