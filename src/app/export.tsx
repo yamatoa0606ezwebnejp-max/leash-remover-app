@@ -31,10 +31,19 @@ function extensionForContentType(contentType: string) {
 export default function ExportScreen() {
   const router = useRouter();
   const theme = useTheme();
-  const { isSignedIn, credits, runPrintRender, removalResult } = useFlow();
+  const { isSignedIn, credits, runPrintRender, removalResult, resetFlow } = useFlow();
   const [preset, setPreset] = useState<(typeof PRINT_PRESETS)[number]['id']>('square');
   const [isExportingStandard, setIsExportingStandard] = useState(false);
   const [isExportingPrint, setIsExportingPrint] = useState(false);
+
+  // Finishing an export was previously a dead end — back to the tap screen
+  // (same photo) or the header's back arrow, one screen at a time, to reach
+  // Home. Most people are done at this point, not retrying the same photo,
+  // so this gets them there in one tap.
+  function handleDone() {
+    resetFlow();
+    router.replace('/');
+  }
 
   async function saveToCameraRoll(imageBase64: string, contentType: string) {
     const { status } = await MediaLibrary.requestPermissionsAsync(true);
@@ -198,7 +207,10 @@ export default function ExportScreen() {
           </ThemedView>
         </View>
 
-        <Button title="Start Over" variant="outline" onPress={() => router.replace('/correct')} />
+        <View style={styles.footerActions}>
+          <Button title="Done" onPress={handleDone} />
+          <Button title="Start Over" variant="outline" onPress={() => router.replace('/correct')} />
+        </View>
       </SafeAreaView>
     </ThemedView>
   );
@@ -221,6 +233,9 @@ const styles = StyleSheet.create({
   },
   content: {
     gap: Spacing.three,
+  },
+  footerActions: {
+    gap: Spacing.two,
   },
   card: {
     borderRadius: Radius.medium,
