@@ -1,19 +1,19 @@
 import { useRouter } from 'expo-router';
 import { useEffect } from 'react';
-import { ActivityIndicator, StyleSheet } from 'react-native';
+import { ActivityIndicator, Alert, StyleSheet } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { MaxContentWidth, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
-import { InsufficientCreditsError } from '@/lib/leash-api';
+import { InsufficientCreditsError, PhotoTooLargeError } from '@/lib/leash-api';
 import { useFlow } from '@/state/flow-context';
 
 export default function ProcessingScreen() {
   const router = useRouter();
   const theme = useTheme();
-  const { runRemoval } = useFlow();
+  const { runRemoval, resetFlow } = useFlow();
 
   useEffect(() => {
     let cancelled = false;
@@ -30,6 +30,17 @@ export default function ProcessingScreen() {
         // same 402 the print path handles in export.tsx.
         if (error instanceof InsufficientCreditsError) {
           router.replace('/purchase');
+          return;
+        }
+        // An oversized photo (413) isn't a detection failure — /detect-failed's
+        // "Couldn't detect a leash" copy would be actively misleading here.
+        if (error instanceof PhotoTooLargeError) {
+          resetFlow();
+          Alert.alert(
+            'Photo too large',
+            'This photo is too large to process (over 25MB or 50 megapixels). Try a different photo — panoramas and ProRAW captures are usually too big.',
+          );
+          router.replace('/');
           return;
         }
         console.warn('runRemoval failed unexpectedly', error);

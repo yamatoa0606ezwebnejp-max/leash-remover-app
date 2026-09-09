@@ -51,6 +51,19 @@ export class InsufficientCreditsError extends Error {
   }
 }
 
+/**
+ * Thrown for a 413 from either /v2/taps or /v2/render — the server rejects
+ * uploads over 25MB or 50 megapixels (see leash-remover-api's docs/api.md,
+ * "Limits and errors"). Panorama photos and ProRAW captures are the common
+ * ways an iPhone photo exceeds these. Callers should show an actionable
+ * message rather than treating this as a detection/render failure.
+ */
+export class PhotoTooLargeError extends Error {
+  constructor() {
+    super('Photo exceeds the server upload limits (25MB or 50 megapixels)');
+  }
+}
+
 export type Point = { x: number; y: number };
 
 export type TapPreview = {
@@ -126,6 +139,9 @@ export async function previewLeashTaps(photo: PhotoInput, points: Point[]): Prom
     headers: await authHeaders(),
     body: form,
   });
+  if (response.status === 413) {
+    throw new PhotoTooLargeError();
+  }
   if (!response.ok) {
     throw new Error(`leash-api /v2/taps failed: ${response.status}`);
   }
@@ -164,6 +180,9 @@ export async function renderLeashRemoval(
     headers: await authHeaders(),
     body: form,
   });
+  if (response.status === 413) {
+    throw new PhotoTooLargeError();
+  }
   if (response.status === 402) {
     throw new InsufficientCreditsError();
   }

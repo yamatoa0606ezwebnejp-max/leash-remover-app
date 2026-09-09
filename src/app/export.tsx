@@ -11,7 +11,7 @@ import { ThemedView } from '@/components/themed-view';
 import { Button } from '@/components/ui/button';
 import { MaxContentWidth, Radius, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
-import { InsufficientCreditsError } from '@/lib/leash-api';
+import { InsufficientCreditsError, PhotoTooLargeError } from '@/lib/leash-api';
 import { useFlow } from '@/state/flow-context';
 
 const PRINT_PRESETS = [
@@ -95,6 +95,13 @@ export default function ExportScreen() {
       } catch (error) {
         if (error instanceof InsufficientCreditsError) {
           router.push('/purchase');
+          return;
+        }
+        if (error instanceof PhotoTooLargeError) {
+          Alert.alert(
+            'Photo too large',
+            'This photo is too large to process (over 25MB or 50 megapixels). Try a different photo — panoramas and ProRAW captures are usually too big.',
+          );
           return;
         }
         throw error;

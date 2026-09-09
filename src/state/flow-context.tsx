@@ -15,6 +15,7 @@ import {
   previewLeashTaps,
   renderLeashRemoval,
   InsufficientCreditsError,
+  PhotoTooLargeError,
   type Point,
   type TapPreview,
 } from '@/lib/leash-api';
@@ -310,7 +311,11 @@ export function FlowProvider({ children }: { children: ReactNode }) {
         // 'pending' forever (spinner never resolves) and anyAccepted never
         // flips true, so "Remove Leash" stays disabled with no explanation —
         // reported via TestFlight as the tap screen "not progressing".
-        setPreviewError('Could not check that tap. Remove it and try again.');
+        setPreviewError(
+          error instanceof PhotoTooLargeError
+            ? 'This photo is too large to process. Try a different photo — panoramas and ProRAW captures are usually too big.'
+            : 'Could not check that tap. Remove it and try again.',
+        );
         setTapPoints((current) =>
           current.map((point) =>
             point.status === 'pending' && points.some((p) => p.id === point.id)
@@ -381,8 +386,11 @@ export function FlowProvider({ children }: { children: ReactNode }) {
     } catch (error) {
       // Let the caller (processing.tsx) send the user to sign-in or the
       // purchase screen on a 402 rather than showing it as a detection
-      // failure — see export.tsx's runPrintRender for the same split.
+      // failure — see export.tsx's runPrintRender for the same split. A 413
+      // gets the same treatment: it's an oversized photo, not a failed
+      // detection, so it shouldn't land on the misleading /detect-failed copy.
       if (error instanceof InsufficientCreditsError) throw error;
+      if (error instanceof PhotoTooLargeError) throw error;
       console.warn('renderLeashRemoval (standard) failed', error);
       return false;
     } finally {
@@ -421,8 +429,10 @@ export function FlowProvider({ children }: { children: ReactNode }) {
       // Let the caller (export.tsx) send the user to the purchase screen on
       // a 402 rather than showing it as a generic render failure. No charge
       // happened either way, so printRequestIdRef is left as-is — reusing it
-      // on a subsequent attempt is still correct, just unnecessary.
+      // on a subsequent attempt is still correct, just unnecessary. Same
+      // split for a 413 (oversized photo) — not a render failure either.
       if (error instanceof InsufficientCreditsError) throw error;
+      if (error instanceof PhotoTooLargeError) throw error;
       console.warn('renderLeashRemoval (print) failed', error);
       return null;
     }
