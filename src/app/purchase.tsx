@@ -20,7 +20,10 @@ import { useFlow } from '@/state/flow-context';
 // Purchased credits are granted server-side once RevenueCat's webhook fires
 // (see supabase/functions/revenuecat-webhook), so after purchasePackage()
 // resolves we don't know the new balance yet — poll refreshCredits() a few
-// times with backoff instead of trusting a client-side amount.
+// times with backoff instead of trusting a client-side amount. Only valid
+// for a consumable pack, where "did the balance go up" is the only success
+// signal available — see waitForSubscriptionSync below for why a
+// subscription purchase can't use this same check.
 async function waitForCreditIncrease(refreshCredits: () => Promise<number>, before: number) {
   const delaysMs = [500, 1000, 2000, 3000, 5000];
   for (const delay of delaysMs) {
@@ -29,6 +32,23 @@ async function waitForCreditIncrease(refreshCredits: () => Promise<number>, befo
     if (balance > before) return true;
   }
   return false;
+}
+
+// A subscription purchase or tier switch is already confirmed the moment
+// purchasePackage() resolves without throwing — StoreKit/RevenueCat's
+// promise only resolves after the transaction actually completes. Unlike a
+// consumable, there's no "the balance went up" signal to wait for: a
+// downgrade (premium -> standard) legitimately *lowers* subscription_balance
+// via grant_subscription_credits' reset-not-add semantics
+// (008_subscription_credit_ledger.sql), so reusing waitForCreditIncrease
+// here would report a successful downgrade as "hasn't updated yet" forever
+// (found in a 2026-09-11 code-review pass, not yet hit live since only
+// upgrades were tested that day). Just give the webhook a moment to land so
+// the UI reflects the new tier/allowance, without gating success on which
+// direction the number moved.
+async function waitForSubscriptionSync(refreshCredits: () => Promise<number>) {
+  await new Promise((resolve) => setTimeout(resolve, 1500));
+  await refreshCredits();
 }
 
 export default function PurchaseScreen() {
@@ -41,6 +61,21 @@ export default function PurchaseScreen() {
   const [errorMessage, setErrorMessage] = useState<string | null>(
     isPurchasesConfigured() ? null : 'Purchases are not configured yet.',
   );
+
+  useEffect(() => {
+    // Refreshes subscriptionTier (fire-and-forget inside refreshCredits, see
+    // flow-context.tsx) so the "current plan" row below reflects a tier
+    // change made just before this screen opened, rather than whatever was
+    // last fetched at sign-in/app-launch — a code-review pass flagged that a
+    // stale tier here could render the subscriber's own current plan as a
+    // purchasable row instead of "current plan". Deliberately once-on-mount
+    // ([] deps, not [refreshCredits]): that function's identity changes
+    // whenever `credits` changes (see its own dependency array), so
+    // depending on it here would re-run this on every credit change, not
+    // just on opening the screen.
+    refreshCredits();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   useEffect(() => {
     if (!isPurchasesConfigured()) return;
@@ -72,18 +107,25 @@ export default function PurchaseScreen() {
       setErrorMessage(null);
       setPurchasingId(pkg.identifier);
       const creditsBefore = credits;
+      const isSubscriptionPackage = pkg.product.identifier in SUBSCRIPTION_TIER_BY_PRODUCT_ID;
       try {
         await Purchases.purchasePackage(pkg);
         setPurchasingId(null);
         setWaitingForCredit(true);
-        const credited = await waitForCreditIncrease(refreshCredits, creditsBefore);
-        setWaitingForCredit(false);
-        if (credited) {
+        if (isSubscriptionPackage) {
+          await waitForSubscriptionSync(refreshCredits);
+          setWaitingForCredit(false);
           router.back();
         } else {
-          setErrorMessage(
-            'Purchase completed, but your balance hasn’t updated yet. Pull back into this screen in a moment.',
-          );
+          const credited = await waitForCreditIncrease(refreshCredits, creditsBefore);
+          setWaitingForCredit(false);
+          if (credited) {
+            router.back();
+          } else {
+            setErrorMessage(
+              'Purchase completed, but your balance hasn’t updated yet. Pull back into this screen in a moment.',
+            );
+          }
         }
       } catch (error) {
         setPurchasingId(null);

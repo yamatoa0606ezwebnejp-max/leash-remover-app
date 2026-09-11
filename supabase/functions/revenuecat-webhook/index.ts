@@ -50,33 +50,32 @@ const MONTHLY_CREDIT_ALLOWANCE_BY_PRODUCT_ID: Record<string, number> = {
 
 const SUBSCRIPTION_PRODUCT_IDS = new Set(Object.keys(MONTHLY_CREDIT_ALLOWANCE_BY_PRODUCT_ID));
 
-// Which lifecycle events reset the subscription credit pool, and to what
-// amount for a given product. INITIAL_PURCHASE/RENEWAL/UNCANCELLATION grant
-// a fresh period's allowance for whichever tier's product_id the event
-// carries (reset, not added — see grant_subscription_credits). EXPIRATION
-// zeroes the pool regardless of tier: access is actually gone at that
-// point, unlike CANCELLATION (which only turns off auto-renew — the
-// subscriber keeps their current period's credits and access until
-// current_period_end, per SUBSCRIPTION_STATUS_BY_EVENT_TYPE's own comment
-// on that distinction), so CANCELLATION deliberately has no entry here and
-// grants/zeroes nothing.
-function subscriptionCreditGrantAmount(eventType: string, productId: string): number | undefined {
-  if (eventType === 'EXPIRATION') return 0;
-  if (
-    eventType === 'INITIAL_PURCHASE' ||
-    eventType === 'RENEWAL' ||
-    eventType === 'UNCANCELLATION' ||
-    // A tier switch (standard <-> premium) resets the pool to the *new*
-    // tier's allowance immediately, same as a fresh period — this is what
-    // keeps "subscription_balance is always this period's allowance for the
-    // plan currently in effect" true as an invariant, rather than adding a
-    // separate up/downgrade-proration rule. See the caller for how
-    // productId is derived for this event type specifically (it's not
-    // event.product_id, which is the *old* plan for PRODUCT_CHANGE).
-    eventType === 'PRODUCT_CHANGE'
-  ) {
-    return MONTHLY_CREDIT_ALLOWANCE_BY_PRODUCT_ID[productId];
-  }
+// Which *status* (not event type) resets the subscription credit pool, and
+// to what amount for a given product — derived from the same `status`
+// handleSubscriptionEvent already computed via SUBSCRIPTION_STATUS_BY_EVENT_TYPE,
+// rather than re-listing event types here too. The two used to be separate
+// lists (one keyed on event type for credits, one on event type for status)
+// that happened to need to stay in lockstep by hand — a code-review pass
+// flagged that as a real drift risk, since adding a new "active-ing" event
+// type would require remembering to update both. Reusing `status` makes
+// that structurally impossible to get out of sync:
+// - 'active' (INITIAL_PURCHASE/RENEWAL/UNCANCELLATION/PRODUCT_CHANGE) grants
+//   a fresh period's allowance for whichever tier's product_id the event
+//   carries (reset, not added — see grant_subscription_credits). This is
+//   what keeps "subscription_balance is always this period's allowance for
+//   the plan currently in effect" true as an invariant, rather than adding a
+//   separate up/downgrade-proration rule.
+// - 'expired' zeroes the pool regardless of tier: access is actually gone.
+// - 'cancelled' deliberately grants/zeroes nothing — CANCELLATION only
+//   turns off auto-renew, the subscriber keeps their current period's
+//   credits and access until current_period_end (see
+//   SUBSCRIPTION_STATUS_BY_EVENT_TYPE's own comment on that distinction).
+function subscriptionCreditGrantAmount(
+  status: 'active' | 'cancelled' | 'expired',
+  productId: string,
+): number | undefined {
+  if (status === 'expired') return 0;
+  if (status === 'active') return MONTHLY_CREDIT_ALLOWANCE_BY_PRODUCT_ID[productId];
   return undefined;
 }
 
@@ -238,7 +237,7 @@ async function handleSubscriptionEvent(eventType: string, event: Record<string, 
   // doesn't touch it, and returns undefined here). `!== undefined` rather
   // than a truthy check: 0 (EXPIRATION's amount) is a real, intentional
   // grant, not "absent".
-  const grantAmount = subscriptionCreditGrantAmount(eventType, effectiveProductId ?? '');
+  const grantAmount = subscriptionCreditGrantAmount(status, effectiveProductId ?? '');
   if (grantAmount !== undefined) {
     const eventId = event.id as string | undefined;
     if (!eventId) {
