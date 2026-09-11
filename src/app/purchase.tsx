@@ -8,7 +8,13 @@ import { ScreenHeader } from '@/components/screen-header';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { MaxContentWidth, Radius, Spacing } from '@/constants/theme';
-import { CREDIT_PACK_PRODUCT_IDS, Purchases, isPurchasesConfigured } from '@/lib/purchases';
+import {
+  CREDIT_PACK_PRODUCT_IDS,
+  SUBSCRIPTION_PRODUCT_IDS_IN_TIER_ORDER,
+  SUBSCRIPTION_TIER_BY_PRODUCT_ID,
+  Purchases,
+  isPurchasesConfigured,
+} from '@/lib/purchases';
 import { useFlow } from '@/state/flow-context';
 
 // Purchased credits are granted server-side once RevenueCat's webhook fires
@@ -27,7 +33,7 @@ async function waitForCreditIncrease(refreshCredits: () => Promise<number>, befo
 
 export default function PurchaseScreen() {
   const router = useRouter();
-  const { credits, refreshCredits } = useFlow();
+  const { credits, refreshCredits, subscriptionTier } = useFlow();
   const [packages, setPackages] = useState<PurchasesPackage[]>([]);
   const [loadingOfferings, setLoadingOfferings] = useState(isPurchasesConfigured());
   const [purchasingId, setPurchasingId] = useState<string | null>(null);
@@ -74,20 +80,77 @@ export default function PurchaseScreen() {
     [credits, refreshCredits, router],
   );
 
+  // The two subscription tiers (once they exist — see
+  // SUBSCRIPTION_TIER_BY_PRODUCT_ID) get their own section, in standard →
+  // premium order, since they're recurring purchases with different framing
+  // ("N credits every month" / already-subscribed status) than a one-time
+  // top-up. Everything else falls back into the consumable list below, same
+  // as before.
+  const subscriptionPackagesInOrder = SUBSCRIPTION_PRODUCT_IDS_IN_TIER_ORDER.map((productId) =>
+    packages.find((pkg) => pkg.product.identifier === productId),
+  ).filter((pkg): pkg is PurchasesPackage => pkg !== undefined);
+  const creditPackages = packages.filter(
+    (pkg) => !(pkg.product.identifier in SUBSCRIPTION_TIER_BY_PRODUCT_ID),
+  );
+
   return (
     <ThemedView style={styles.container}>
       <SafeAreaView style={styles.safeArea}>
         <ScreenHeader title="Buy Credits" onBack={() => router.back()} />
 
         <ThemedText themeColor="textSecondary">
-          Print exports require credits.{'\n'}Current balance: {credits}
+          Removing a leash and print exports both use credits.{'\n'}Current balance: {credits}
         </ThemedText>
 
         {loadingOfferings && <ActivityIndicator />}
         {errorMessage && <ThemedText themeColor="textSecondary">{errorMessage}</ThemedText>}
 
+        {subscriptionPackagesInOrder.length > 0 && (
+          <View style={styles.list}>
+            <ThemedText type="smallBold">Subscribe</ThemedText>
+            {subscriptionPackagesInOrder.map((pkg) => {
+              const tier =
+                SUBSCRIPTION_TIER_BY_PRODUCT_ID[
+                  pkg.product.identifier as keyof typeof SUBSCRIPTION_TIER_BY_PRODUCT_ID
+                ];
+              const isCurrentTier = subscriptionTier === tier;
+              const isPurchasing = purchasingId === pkg.identifier;
+              return isCurrentTier ? (
+                <ThemedView key={pkg.identifier} type="backgroundElement" style={styles.rowInner}>
+                  <ThemedText type="smallBold">
+                    {pkg.product.title} — current plan
+                  </ThemedText>
+                </ThemedView>
+              ) : (
+                <Pressable
+                  key={pkg.identifier}
+                  disabled={isPurchasing || waitingForCredit}
+                  onPress={() => handlePurchase(pkg)}
+                  style={({ pressed }) => [
+                    styles.row,
+                    { opacity: pressed || isPurchasing || waitingForCredit ? 0.7 : 1 },
+                  ]}>
+                  <ThemedView type="backgroundElement" style={styles.rowInner}>
+                    <View>
+                      <ThemedText type="smallBold">{pkg.product.title}</ThemedText>
+                      <ThemedText type="small" themeColor="textSecondary">
+                        Credits every month, auto-renews
+                      </ThemedText>
+                    </View>
+                    {isPurchasing ? (
+                      <ActivityIndicator />
+                    ) : (
+                      <ThemedText type="mono">{pkg.product.priceString}</ThemedText>
+                    )}
+                  </ThemedView>
+                </Pressable>
+              );
+            })}
+          </View>
+        )}
+
         <View style={styles.list}>
-          {packages.map((pkg) => {
+          {creditPackages.map((pkg) => {
             const amount =
               CREDIT_PACK_PRODUCT_IDS[pkg.product.identifier as keyof typeof CREDIT_PACK_PRODUCT_IDS];
             const isPurchasing = purchasingId === pkg.identifier;

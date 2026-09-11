@@ -9,13 +9,14 @@ import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { MaxContentWidth, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
+import { warmLeashApi } from '@/lib/leash-api';
 import { useFlow } from '@/state/flow-context';
 
 export default function PhotoSelectScreen() {
   const router = useRouter();
   const theme = useTheme();
   const insets = useSafeAreaInsets();
-  const { hasSeenOnboarding, pickPhoto, credits } = useFlow();
+  const { hasSeenOnboarding, pickPhoto, credits, subscriptionTier } = useFlow();
 
   if (!hasSeenOnboarding) {
     return <Redirect href="/onboarding" />;
@@ -26,6 +27,21 @@ export default function PhotoSelectScreen() {
     if (!permission.granted) {
       Alert.alert('Photo access needed', 'Please allow access to your photo library in Settings.');
       return;
+    }
+
+    // Tiered warm timing (project memory project_leashoff_billing_v2_redesign,
+    // decided 2026-09-05/06, generalized to 3 tiers 2026-09-11): both paid
+    // tiers (standard and premium) get a warm call here, fired before the
+    // native picker opens so its browsing time doubles as cold-start-hiding
+    // buffer — the only point in this flow where that buffer exists (the
+    // picker closes before pickPhoto/first-tap fire, so warming at either of
+    // those points has no lead time left to use). Free tier gets no warm
+    // call at all: every warm costs real Cloud Run money whether or not the
+    // user goes on to actually render, so it's gated behind a paid tier
+    // rather than fired speculatively for everyone. Fire-and-forget: a
+    // failed/slow warm should never block opening the picker.
+    if (subscriptionTier !== 'free') {
+      warmLeashApi().catch((error) => console.warn('warmLeashApi failed', error));
     }
 
     const result = await ImagePicker.launchImageLibraryAsync({

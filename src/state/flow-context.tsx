@@ -20,7 +20,12 @@ import {
   type TapPreview,
 } from '@/lib/leash-api';
 import { supabase } from '@/lib/supabase';
-import { isPurchasesConfigured, Purchases } from '@/lib/purchases';
+import {
+  isPurchasesConfigured,
+  Purchases,
+  SUBSCRIPTION_TIER_BY_PRODUCT_ID,
+  type SubscriptionTier,
+} from '@/lib/purchases';
 
 // RevenueCat's app_user_id must equal the Supabase user id, so that the
 // revenuecat-webhook Edge Function can credit the right account server-side
@@ -142,6 +147,18 @@ type FlowState = {
   credits: number;
   refreshCredits: () => Promise<number>;
 
+  // Which paid tier (if any) the user currently has access to — 'free' when
+  // there's no active/still-in-period subscription. "Still in period"
+  // includes a cancelled-but-not-yet-expired subscription: RevenueCat's
+  // CANCELLATION just turns off auto-renew, access continues until
+  // current_period_end (see revenuecat-webhook's
+  // SUBSCRIPTION_STATUS_BY_EVENT_TYPE comment). Backed by
+  // public.subscriptions.revenuecat_product_id
+  // (006_premium_subscriptions.sql), written server-side only by the
+  // webhook — the product id itself tells standard and premium apart, no
+  // separate tier column needed.
+  subscriptionTier: SubscriptionTier;
+
   resetFlow: () => void;
 };
 
@@ -167,6 +184,7 @@ export function FlowProvider({ children }: { children: ReactNode }) {
   const [userId, setUserId] = useState<string | null>(null);
   const [isAnonymous, setIsAnonymous] = useState(true);
   const [credits, setCredits] = useState(0);
+  const [subscriptionTier, setSubscriptionTier] = useState<SubscriptionTier>('free');
   // Mirrors `credits` for fetchCredits' error path below, which needs to
   // read the current balance without depending on it — depending on
   // `credits` directly would change fetchCredits' identity every time it
@@ -197,7 +215,17 @@ export function FlowProvider({ children }: { children: ReactNode }) {
   const standardRequestIdRef = useRef<string | null>(null);
 
   const fetchCredits = useCallback(async (uid: string) => {
-    const { data, error } = await supabase.from('credits').select('balance').eq('user_id', uid).maybeSingle();
+    // Total spendable balance is purchased/free (balance) plus the
+    // subscription pool (subscription_balance,
+    // 008_subscription_credit_ledger.sql) — same total leash-remover-api's
+    // get_credit_balance/consume_print_credit compute server-side, so the
+    // client's displayed number matches what the server will actually let
+    // it spend.
+    const { data, error } = await supabase
+      .from('credits')
+      .select('balance, subscription_balance')
+      .eq('user_id', uid)
+      .maybeSingle();
     if (error) {
       // Leave the existing balance alone on a failed read — this is the
       // fallback signIn() reaches for when claim_free_credit itself fails,
@@ -206,9 +234,43 @@ export function FlowProvider({ children }: { children: ReactNode }) {
       console.warn('fetchCredits failed', error);
       return creditsRef.current;
     }
-    const balance = data?.balance ?? 0;
+    const balance = (data?.balance ?? 0) + (data?.subscription_balance ?? 0);
     setCredits(balance);
     return balance;
+  }, []);
+
+  // Subscription tier is read separately from credits — it drives UI (e.g.
+  // the tiered warm-call timing below) rather than a spendable number, and a
+  // failed read here shouldn't stomp on a good credits read or vice versa.
+  const fetchSubscriptionTier = useCallback(async (uid: string) => {
+    const { data, error } = await supabase
+      .from('subscriptions')
+      .select('status, revenuecat_product_id, current_period_end')
+      .eq('user_id', uid)
+      .maybeSingle();
+    if (error) {
+      console.warn('fetchSubscriptionTier failed', error);
+      return;
+    }
+    const hasAccess =
+      data?.status === 'active' ||
+      (data?.status === 'cancelled' &&
+        !!data.current_period_end &&
+        new Date(data.current_period_end).getTime() > Date.now());
+    const tier = hasAccess
+      ? SUBSCRIPTION_TIER_BY_PRODUCT_ID[
+          data?.revenuecat_product_id as keyof typeof SUBSCRIPTION_TIER_BY_PRODUCT_ID
+        ]
+      : undefined;
+    // hasAccess true but no matching tier (null/renamed/unrecognized
+    // revenuecat_product_id) would otherwise fall back to 'free' below with
+    // no trace anywhere — server-side spending is unaffected (it sums both
+    // credit pools regardless of tier), but the UI would silently
+    // misrepresent an active subscriber as free with nothing to debug from.
+    if (hasAccess && !tier) {
+      console.warn('fetchSubscriptionTier: active subscription with unrecognized product id', data);
+    }
+    setSubscriptionTier(tier ?? 'free');
   }, []);
 
   // Restore an existing Supabase session (persisted in the Keychain) on
@@ -247,11 +309,12 @@ export function FlowProvider({ children }: { children: ReactNode }) {
       setIsAnonymous(user?.is_anonymous ?? true);
       if (user && !user.is_anonymous) {
         fetchCredits(user.id);
+        fetchSubscriptionTier(user.id);
         linkPurchasesIdentity(user.id);
       }
     }
     bootstrap();
-  }, [fetchCredits]);
+  }, [fetchCredits, fetchSubscriptionTier]);
 
   const completeOnboarding = useCallback(() => setHasSeenOnboarding(true), []);
 
@@ -467,23 +530,24 @@ export function FlowProvider({ children }: { children: ReactNode }) {
     setUserId(data.user.id);
     setIsAnonymous(false);
     await linkPurchasesIdentity(data.user.id);
-    const { data: balance, error: creditError } = await supabase.rpc('claim_free_credit');
-    if (creditError) {
-      // The free-credit claim failing doesn't mean the balance is 0 — this
-      // user may be a reinstall with existing credits. Falling back to
-      // balance ?? 0 here sent people with real credits straight to the
-      // purchase screen (leash-remover-api review, 2026-08-28).
-      console.warn('claim_free_credit failed', creditError);
-      await fetchCredits(data.user.id);
-    } else {
-      setCredits(balance ?? 0);
-    }
-  }, [fetchCredits]);
+    fetchSubscriptionTier(data.user.id);
+    // claim_free_credit's return value only ever reflects credits.balance
+    // (the free/purchased pool) — a reinstalling premium subscriber's
+    // subscription_balance wouldn't show up in it — so always re-fetch the
+    // real total afterward rather than trusting the RPC's own return value.
+    // The claim failing doesn't mean the balance is 0 either: this user may
+    // be a reinstall with existing credits (leash-remover-api review,
+    // 2026-08-28) — fetchCredits is correct either way.
+    const { error: creditError } = await supabase.rpc('claim_free_credit');
+    if (creditError) console.warn('claim_free_credit failed', creditError);
+    await fetchCredits(data.user.id);
+  }, [fetchCredits, fetchSubscriptionTier]);
 
   const signOut = useCallback(async () => {
     await supabase.auth.signOut();
     await unlinkPurchasesIdentity();
     setCredits(0);
+    setSubscriptionTier('free');
     // /v2 needs a session for every call, including the free flow, so drop
     // straight back into an anonymous one rather than leaving no session.
     const { data, error } = await supabase.auth.signInAnonymously();
@@ -503,6 +567,7 @@ export function FlowProvider({ children }: { children: ReactNode }) {
 
     await unlinkPurchasesIdentity();
     setCredits(0);
+    setSubscriptionTier('free');
     // The account is already gone server-side, so there's nothing left to
     // sign out of remotely — just clear the now-stale local session, then
     // drop back into a fresh anonymous one, same as signOut.
@@ -525,8 +590,14 @@ export function FlowProvider({ children }: { children: ReactNode }) {
   // sheet closes, so callers should retry a few times).
   const refreshCredits = useCallback(async () => {
     if (!userId) return credits;
+    // Fire-and-forget: a subscription purchase (unlike a consumable pack)
+    // can flip subscriptionTier without moving `credits` at all if the allowance
+    // placeholder is ever 0, so this can't piggyback on the credits
+    // increase check purchase.tsx already polls with — refresh it
+    // independently instead of blocking refreshCredits' return value on it.
+    fetchSubscriptionTier(userId);
     return fetchCredits(userId);
-  }, [userId, fetchCredits, credits]);
+  }, [userId, fetchCredits, fetchSubscriptionTier, credits]);
 
   const resetFlow = useCallback(() => {
     printRequestIdRef.current = null;
@@ -571,6 +642,7 @@ export function FlowProvider({ children }: { children: ReactNode }) {
       deleteAccount,
       credits,
       refreshCredits,
+      subscriptionTier,
       resetFlow,
     }),
     [
@@ -600,6 +672,7 @@ export function FlowProvider({ children }: { children: ReactNode }) {
       deleteAccount,
       credits,
       refreshCredits,
+      subscriptionTier,
       resetFlow,
     ],
   );
