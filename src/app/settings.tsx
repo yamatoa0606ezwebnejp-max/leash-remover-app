@@ -72,9 +72,12 @@ export default function SettingsScreen() {
             />
           </View>
         ) : (
-          <ThemedText themeColor="textSecondary">
-            Sign in with Apple to manage your account.
-          </ThemedText>
+          <View style={styles.actions}>
+            <ThemedText themeColor="textSecondary">
+              Sign in with Apple to manage your account.
+            </ThemedText>
+            <Button title="Sign in with Apple" onPress={() => router.push('/sign-in')} />
+          </View>
         )}
       </SafeAreaView>
     </ThemedView>

@@ -33,7 +33,7 @@ async function waitForCreditIncrease(refreshCredits: () => Promise<number>, befo
 
 export default function PurchaseScreen() {
   const router = useRouter();
-  const { credits, refreshCredits, subscriptionTier } = useFlow();
+  const { credits, refreshCredits, subscriptionTier, isSignedIn } = useFlow();
   const [packages, setPackages] = useState<PurchasesPackage[]>([]);
   const [loadingOfferings, setLoadingOfferings] = useState(isPurchasesConfigured());
   const [purchasingId, setPurchasingId] = useState<string | null>(null);
@@ -54,6 +54,21 @@ export default function PurchaseScreen() {
 
   const handlePurchase = useCallback(
     async (pkg: PurchasesPackage) => {
+      // An anonymous purchase completes on Apple's side but can never be
+      // credited: RevenueCat's app_user_id for an anonymous session is its
+      // own alias string, not a Supabase uuid, so revenuecat-webhook's RPC
+      // calls fail outright (uuid cast error) and retry forever with no
+      // resolution — confirmed by hitting exactly this in a real sandbox
+      // test (2026-09-11). Signing in later re-attributes the purchase to
+      // the real account for RevenueCat's own records, but not for that
+      // already-sent, already-failed webhook delivery. Block the purchase
+      // itself, the same way correct.tsx/export.tsx already gate their
+      // credit-charging actions on isSignedIn, rather than let it happen
+      // and fail silently server-side.
+      if (!isSignedIn) {
+        router.push('/sign-in');
+        return;
+      }
       setErrorMessage(null);
       setPurchasingId(pkg.identifier);
       const creditsBefore = credits;
@@ -77,7 +92,7 @@ export default function PurchaseScreen() {
         setErrorMessage('Purchase failed. Please try again.');
       }
     },
-    [credits, refreshCredits, router],
+    [credits, refreshCredits, router, isSignedIn],
   );
 
   // The two subscription tiers (once they exist — see
