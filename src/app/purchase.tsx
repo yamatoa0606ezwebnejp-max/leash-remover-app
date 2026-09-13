@@ -1,6 +1,6 @@
 import { useFocusEffect, useRouter } from 'expo-router';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { ActivityIndicator, Pressable, StyleSheet, View } from 'react-native';
+import { ActivityIndicator, Linking, Pressable, StyleSheet, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import type { PurchasesError, PurchasesPackage } from 'react-native-purchases';
 
@@ -186,7 +186,29 @@ export default function PurchaseScreen() {
 
         {subscriptionPackagesInOrder.length > 0 && (
           <View style={styles.list}>
-            <ThemedText type="smallBold">Subscribe</ThemedText>
+            <ThemedText type="smallBold">Plans</ThemedText>
+            {subscriptionTier === 'free' ? (
+              <ThemedView type="backgroundElement" style={styles.rowInner}>
+                <ThemedText type="smallBold">Free — current plan</ThemedText>
+              </ThemedView>
+            ) : (
+              // The only way off a paid plan is cancelling it — same
+              // Apple-owned screen Settings' "Manage Subscription" links to,
+              // since there's no app-side "downgrade to Free" action to
+              // build (cancelling is a StoreKit action, not a Supabase one).
+              <Pressable
+                onPress={() => Linking.openURL('https://apps.apple.com/account/subscriptions')}
+                style={({ pressed }) => [styles.row, { opacity: pressed ? 0.7 : 1 }]}>
+                <ThemedView type="backgroundElement" style={styles.rowInner}>
+                  <View style={styles.rowText}>
+                    <ThemedText type="smallBold">Free</ThemedText>
+                    <ThemedText type="small" themeColor="textSecondary">
+                      Cancel your subscription to switch back
+                    </ThemedText>
+                  </View>
+                </ThemedView>
+              </Pressable>
+            )}
             {subscriptionPackagesInOrder.map((pkg) => {
               const tier =
                 SUBSCRIPTION_TIER_BY_PRODUCT_ID[
