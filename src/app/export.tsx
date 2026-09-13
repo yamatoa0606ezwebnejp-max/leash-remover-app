@@ -12,13 +12,8 @@ import { Button } from '@/components/ui/button';
 import { MaxContentWidth, Radius, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 import { InsufficientCreditsError, PhotoTooLargeError } from '@/lib/leash-api';
+import { applyPrintPreset, PRINT_PRESETS } from '@/lib/print-presets';
 import { useFlow } from '@/state/flow-context';
-
-const PRINT_PRESETS = [
-  { id: 'square', label: 'Square' },
-  { id: 'a4', label: 'A4' },
-  { id: 'landscape', label: 'Landscape' },
-] as const;
 
 // content_type is e.g. "image/png" or "image/jpeg" — MediaLibrary's
 // Asset.create() infers the asset type from the file's extension, so the
@@ -119,8 +114,19 @@ export default function ExportScreen() {
         Alert.alert('Export failed', 'The photo could not be processed. Please try again.');
         return;
       }
+      let cropped;
       try {
-        const saved = await saveToCameraRoll(result.imageBase64, result.contentType);
+        cropped = await applyPrintPreset(result.imageBase64, result.contentType, preset);
+      } catch (error) {
+        console.warn('applyPrintPreset failed', error);
+        Alert.alert(
+          'Export failed',
+          'The export rendered and your credit was used, but preparing the print crop failed. Please try again.',
+        );
+        return;
+      }
+      try {
+        const saved = await saveToCameraRoll(cropped.imageBase64, cropped.contentType);
         if (saved) {
           Alert.alert('Exported', 'Your print export was saved to Photos. 1 credit was used.');
         }
