@@ -1,5 +1,5 @@
-import { useRouter } from 'expo-router';
-import { useCallback, useEffect, useState } from 'react';
+import { useFocusEffect, useRouter } from 'expo-router';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, Pressable, StyleSheet, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import type { PurchasesError, PurchasesPackage } from 'react-native-purchases';
@@ -61,6 +61,16 @@ export default function PurchaseScreen() {
   const [errorMessage, setErrorMessage] = useState<string | null>(
     isPurchasesConfigured() ? null : 'Purchases are not configured yet.',
   );
+  // Set right before redirecting an anonymous tap to /sign-in, so the same
+  // package resumes automatically once signed in instead of the user having
+  // to find and tap it again — /purchase stays mounted underneath the
+  // /sign-in modal (both are Stack.Screen presentation: 'modal', not a
+  // separate unmounting navigator), so this ref survives the round trip.
+  // Resolved via useFocusEffect below rather than a plain isSignedIn effect:
+  // if the user backs out of /sign-in without completing it, this screen
+  // still regains focus, so the ref gets cleared there too instead of
+  // lingering to auto-fire on some unrelated later sign-in.
+  const pendingPurchaseRef = useRef<PurchasesPackage | null>(null);
 
   useEffect(() => {
     // Refreshes subscriptionTier (fire-and-forget inside refreshCredits, see
@@ -101,6 +111,7 @@ export default function PurchaseScreen() {
       // credit-charging actions on isSignedIn, rather than let it happen
       // and fail silently server-side.
       if (!isSignedIn) {
+        pendingPurchaseRef.current = pkg;
         router.push('/sign-in');
         return;
       }
@@ -135,6 +146,17 @@ export default function PurchaseScreen() {
       }
     },
     [credits, refreshCredits, router, isSignedIn],
+  );
+
+  useFocusEffect(
+    useCallback(() => {
+      if (!pendingPurchaseRef.current) return;
+      const pkg = pendingPurchaseRef.current;
+      pendingPurchaseRef.current = null;
+      if (isSignedIn) {
+        handlePurchase(pkg);
+      }
+    }, [isSignedIn, handlePurchase]),
   );
 
   // The two subscription tiers (once they exist — see
