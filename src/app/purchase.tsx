@@ -210,10 +210,17 @@ export default function PurchaseScreen() {
                     { opacity: pressed || isPurchasing || waitingForCredit ? 0.7 : 1 },
                   ]}>
                   <ThemedView type="backgroundElement" style={styles.rowInner}>
-                    <View>
+                    <View style={styles.rowText}>
                       <ThemedText type="smallBold">{pkg.product.title}</ThemedText>
+                      {/* pkg.product.description is the App Store Connect
+                          localized description (e.g. "10 credits every
+                          month, auto-renews") — read from there instead of
+                          hardcoding the count here, so it can't drift from
+                          whatever the real product is actually configured
+                          to grant. */}
                       <ThemedText type="small" themeColor="textSecondary">
-                        Credits every month, auto-renews
+                        {pkg.product.description}
+                        {'\n'}Instant start — no waiting when you open a photo
                       </ThemedText>
                     </View>
                     {isPurchasing ? (
@@ -289,5 +296,9 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
+  },
+  rowText: {
+    flex: 1,
+    marginRight: Spacing.two,
   },
 });
