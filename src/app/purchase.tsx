@@ -1,6 +1,6 @@
 import { useFocusEffect, useRouter } from 'expo-router';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { ActivityIndicator, Linking, Pressable, StyleSheet, View } from 'react-native';
+import { ActivityIndicator, Alert, Pressable, StyleSheet, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import type { PurchasesError, PurchasesPackage } from 'react-native-purchases';
 
@@ -14,6 +14,7 @@ import {
   SUBSCRIPTION_TIER_BY_PRODUCT_ID,
   Purchases,
   isPurchasesConfigured,
+  openSubscriptionManagement,
 } from '@/lib/purchases';
 import { useFlow } from '@/state/flow-context';
 
@@ -197,7 +198,15 @@ export default function PurchaseScreen() {
               // since there's no app-side "downgrade to Free" action to
               // build (cancelling is a StoreKit action, not a Supabase one).
               <Pressable
-                onPress={() => Linking.openURL('https://apps.apple.com/account/subscriptions')}
+                onPress={async () => {
+                  const opened = await openSubscriptionManagement();
+                  if (!opened) {
+                    Alert.alert(
+                      'Could not open',
+                      'Manage your subscription from the App Store app instead: your Apple ID → Subscriptions.',
+                    );
+                  }
+                }}
                 style={({ pressed }) => [styles.row, { opacity: pressed ? 0.7 : 1 }]}>
                 <ThemedView type="backgroundElement" style={styles.rowInner}>
                   <View style={styles.rowText}>
@@ -239,9 +248,11 @@ export default function PurchaseScreen() {
                           month, auto-renews") — read from there instead of
                           hardcoding the count here, so it can't drift from
                           whatever the real product is actually configured
-                          to grant. */}
+                          to grant. Falls back to a generic line if that
+                          field is ever empty/misconfigured, so a bad ASC
+                          edit can't silently blank out this row. */}
                       <ThemedText type="small" themeColor="textSecondary">
-                        {pkg.product.description}
+                        {pkg.product.description || 'Credits every month, auto-renews'}
                         {'\n'}Instant start — no waiting when you open a photo
                       </ThemedText>
                     </View>

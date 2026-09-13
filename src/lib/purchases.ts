@@ -1,4 +1,4 @@
-import { Platform } from 'react-native';
+import { Linking, Platform } from 'react-native';
 import Purchases from 'react-native-purchases';
 
 const apiKey = process.env.EXPO_PUBLIC_REVENUECAT_API_KEY;
@@ -56,6 +56,22 @@ export function configurePurchases() {
 
 export function isPurchasesConfigured() {
   return configured;
+}
+
+// Cancelling/downgrading a subscription is a StoreKit action, not a
+// Supabase one — this app has no way to do it itself, only to open Apple's
+// own management screen. Shared by Settings and the purchase screen's Free
+// row so the URL and failure handling can't drift between the two.
+const SUBSCRIPTION_MANAGEMENT_URL = 'https://apps.apple.com/account/subscriptions';
+
+export async function openSubscriptionManagement() {
+  try {
+    await Linking.openURL(SUBSCRIPTION_MANAGEMENT_URL);
+    return true;
+  } catch (error) {
+    console.warn('openSubscriptionManagement failed', error);
+    return false;
+  }
 }
 
 export { Purchases };
