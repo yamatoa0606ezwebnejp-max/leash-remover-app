@@ -1,6 +1,6 @@
 import { useRouter } from 'expo-router';
 import { useState } from 'react';
-import { ActivityIndicator, Alert, StyleSheet, View } from 'react-native';
+import { ActivityIndicator, Alert, Linking, StyleSheet, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { Button } from '@/components/ui/button';
@@ -12,7 +12,7 @@ import { useFlow } from '@/state/flow-context';
 
 export default function SettingsScreen() {
   const router = useRouter();
-  const { isSignedIn, signOut, deleteAccount } = useFlow();
+  const { isSignedIn, signOut, deleteAccount, subscriptionTier } = useFlow();
   const [isWorking, setIsWorking] = useState(false);
 
   async function handleSignOut() {
@@ -63,6 +63,17 @@ export default function SettingsScreen() {
 
         {isSignedIn ? (
           <View style={styles.actions}>
+            {subscriptionTier !== 'free' && (
+              // Downgrading to Free means cancelling the subscription, which
+              // is always Apple's own subscription-management screen, not
+              // something this app can do itself (or should — cancellation
+              // is a StoreKit-level action, not a Supabase one).
+              <Button
+                title="Manage Subscription"
+                variant="secondary"
+                onPress={() => Linking.openURL('https://apps.apple.com/account/subscriptions')}
+              />
+            )}
             <Button title="Sign Out" variant="secondary" onPress={handleSignOut} disabled={isWorking} />
             <Button
               title="Delete Account"
