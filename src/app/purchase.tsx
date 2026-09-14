@@ -198,6 +198,7 @@ export default function PurchaseScreen() {
               // since there's no app-side "downgrade to Free" action to
               // build (cancelling is a StoreKit action, not a Supabase one).
               <Pressable
+                disabled={purchasingId !== null || waitingForCredit}
                 onPress={async () => {
                   const opened = await openSubscriptionManagement();
                   if (!opened) {
@@ -207,7 +208,10 @@ export default function PurchaseScreen() {
                     );
                   }
                 }}
-                style={({ pressed }) => [styles.row, { opacity: pressed ? 0.7 : 1 }]}>
+                style={({ pressed }) => [
+                  styles.row,
+                  { opacity: pressed || purchasingId !== null || waitingForCredit ? 0.7 : 1 },
+                ]}>
                 <ThemedView type="backgroundElement" style={styles.rowInner}>
                   <View style={styles.rowText}>
                     <ThemedText type="smallBold">Free</ThemedText>
