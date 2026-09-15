@@ -8,12 +8,12 @@ import { ScreenHeader } from '@/components/screen-header';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { MaxContentWidth, Spacing } from '@/constants/theme';
-import { openSubscriptionManagement } from '@/lib/purchases';
+import { openSubscriptionManagement, restorePurchases } from '@/lib/purchases';
 import { useFlow } from '@/state/flow-context';
 
 export default function SettingsScreen() {
   const router = useRouter();
-  const { isSignedIn, signOut, deleteAccount } = useFlow();
+  const { isSignedIn, signOut, deleteAccount, refreshCredits } = useFlow();
   const [isWorking, setIsWorking] = useState(false);
 
   async function handleManageSubscription() {
@@ -23,6 +23,21 @@ export default function SettingsScreen() {
         'Could not open',
         'Manage your subscription from the App Store app instead: your Apple ID → Subscriptions.',
       );
+    }
+  }
+
+  async function handleRestorePurchases() {
+    setIsWorking(true);
+    try {
+      const restored = await restorePurchases();
+      if (restored) {
+        await refreshCredits();
+        Alert.alert('Restored', 'Your purchases have been restored.');
+      } else {
+        Alert.alert('Could not restore', 'Please try again.');
+      }
+    } finally {
+      setIsWorking(false);
     }
   }
 
@@ -83,6 +98,12 @@ export default function SettingsScreen() {
                 manage). Better to always offer the one real escape hatch
                 than hide it behind a value that isn't always trustworthy. */}
             <Button title="Manage Subscription" variant="secondary" onPress={handleManageSubscription} />
+            <Button
+              title="Restore Purchases"
+              variant="secondary"
+              onPress={handleRestorePurchases}
+              disabled={isWorking}
+            />
             <Button title="Sign Out" variant="secondary" onPress={handleSignOut} disabled={isWorking} />
             <Button
               title="Delete Account"

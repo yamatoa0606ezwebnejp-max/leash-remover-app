@@ -74,4 +74,20 @@ export async function openSubscriptionManagement() {
   }
 }
 
+// This app's access (credits, subscription tier) lives server-side against
+// the Supabase account, not the local RevenueCat/StoreKit receipt cache, so
+// re-signing in with the same Apple ID already restores everything on its
+// own — this is a belt-and-suspenders sync of RevenueCat's local state for
+// App Review's benefit (Guideline 3.1.1 expects a restore path on apps with
+// subscriptions), not the primary recovery mechanism.
+export async function restorePurchases() {
+  try {
+    await Purchases.restorePurchases();
+    return true;
+  } catch (error) {
+    console.warn('restorePurchases failed', error);
+    return false;
+  }
+}
+
 export { Purchases };
