@@ -90,4 +90,23 @@ export async function restorePurchases() {
   }
 }
 
+// Required in-app on the purchase screen itself for apps offering
+// auto-renewable subscriptions (Guideline 3.1.2(c)) — a link in the App
+// Store description/metadata alone isn't enough. Same URLs already used in
+// the App Store Connect Privacy Policy field and the app description's EULA
+// line, kept here so the purchase screen can't drift from those.
+export const PRIVACY_POLICY_URL =
+  'https://claude.ai/code/artifact/afdd9332-3fd0-4137-b296-059983d49ce4#privacy';
+export const TERMS_OF_USE_URL = 'https://www.apple.com/legal/internet-services/itunes/dev/stdeula/';
+
+export async function openLegalLink(url: string) {
+  try {
+    await Linking.openURL(url);
+    return true;
+  } catch (error) {
+    console.warn('openLegalLink failed', error);
+    return false;
+  }
+}
+
 export { Purchases };

@@ -10,10 +10,13 @@ import { ThemedView } from '@/components/themed-view';
 import { MaxContentWidth, Radius, Spacing } from '@/constants/theme';
 import {
   CREDIT_PACK_PRODUCT_IDS,
+  PRIVACY_POLICY_URL,
   SUBSCRIPTION_PRODUCT_IDS_IN_TIER_ORDER,
   SUBSCRIPTION_TIER_BY_PRODUCT_ID,
+  TERMS_OF_USE_URL,
   Purchases,
   isPurchasesConfigured,
+  openLegalLink,
   openSubscriptionManagement,
 } from '@/lib/purchases';
 import { useFlow } from '@/state/flow-context';
@@ -269,6 +272,14 @@ export default function PurchaseScreen() {
                 </Pressable>
               );
             })}
+            <View style={styles.legalLinks}>
+              <Pressable onPress={() => openLegalLink(PRIVACY_POLICY_URL)}>
+                <ThemedText type="link">Privacy Policy</ThemedText>
+              </Pressable>
+              <Pressable onPress={() => openLegalLink(TERMS_OF_USE_URL)}>
+                <ThemedText type="link">Terms of Use</ThemedText>
+              </Pressable>
+            </View>
           </View>
         )}
 
@@ -323,6 +334,11 @@ const styles = StyleSheet.create({
   },
   list: {
     gap: Spacing.two,
+  },
+  legalLinks: {
+    flexDirection: 'row',
+    gap: Spacing.four,
+    marginTop: Spacing.one,
   },
   row: {
     borderRadius: Radius.medium,
