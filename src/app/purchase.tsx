@@ -15,6 +15,7 @@ import {
   SUBSCRIPTION_TIER_BY_PRODUCT_ID,
   TERMS_OF_USE_URL,
   Purchases,
+  ensurePurchasesIdentity,
   isPurchasesConfigured,
   openLegalLink,
   openSubscriptionManagement,
@@ -57,7 +58,7 @@ async function waitForSubscriptionSync(refreshCredits: () => Promise<number>) {
 
 export default function PurchaseScreen() {
   const router = useRouter();
-  const { credits, refreshCredits, subscriptionTier, isSignedIn } = useFlow();
+  const { credits, refreshCredits, subscriptionTier, isSignedIn, userId } = useFlow();
   const [packages, setPackages] = useState<PurchasesPackage[]>([]);
   const [loadingOfferings, setLoadingOfferings] = useState(isPurchasesConfigured());
   const [purchasingId, setPurchasingId] = useState<string | null>(null);
@@ -121,6 +122,15 @@ export default function PurchaseScreen() {
       }
       setErrorMessage(null);
       setPurchasingId(pkg.identifier);
+      // isSignedIn alone doesn't prove RevenueCat knows who this is: the
+      // logIn at sign-in/app-launch only warns on failure, so a flaky
+      // network there leaves RevenueCat on its anonymous id and this
+      // purchase would be uncreditable (issue #6). Re-check right here.
+      if (!userId || !(await ensurePurchasesIdentity(userId))) {
+        setPurchasingId(null);
+        setErrorMessage('Could not verify your account. Check your connection and try again.');
+        return;
+      }
       const creditsBefore = credits;
       const isSubscriptionPackage = pkg.product.identifier in SUBSCRIPTION_TIER_BY_PRODUCT_ID;
       try {
@@ -149,7 +159,7 @@ export default function PurchaseScreen() {
         setErrorMessage('Purchase failed. Please try again.');
       }
     },
-    [credits, refreshCredits, router, isSignedIn],
+    [credits, refreshCredits, router, isSignedIn, userId],
   );
 
   useFocusEffect(

@@ -58,6 +58,24 @@ export function isPurchasesConfigured() {
   return configured;
 }
 
+// Makes sure RevenueCat's app_user_id is this Supabase user id, retrying
+// logIn if it isn't, and reports whether it ended up matching. A purchase
+// made under any other id (typically $RCAnonymousID:..., left over when an
+// earlier logIn failed on a flaky network) can never be credited by
+// revenuecat-webhook — see issue #6 — so the purchase screen calls this
+// right before purchasePackage() and refuses to buy on false.
+export async function ensurePurchasesIdentity(userId: string) {
+  if (!configured) return false;
+  try {
+    if ((await Purchases.getAppUserID()) === userId) return true;
+    await Purchases.logIn(userId);
+    return (await Purchases.getAppUserID()) === userId;
+  } catch (error) {
+    console.warn('ensurePurchasesIdentity failed', error);
+    return false;
+  }
+}
+
 // Cancelling/downgrading a subscription is a StoreKit action, not a
 // Supabase one — this app has no way to do it itself, only to open Apple's
 // own management screen. Shared by Settings and the purchase screen's Free
