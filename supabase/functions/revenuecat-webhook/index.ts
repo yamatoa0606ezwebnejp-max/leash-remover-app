@@ -108,6 +108,20 @@ const serviceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
 
 const supabase = createClient(supabaseUrl, serviceRoleKey);
 
+// app_user_id is only creditable when it's a Supabase user id (a uuid) —
+// see linkPurchasesIdentity / ensurePurchasesIdentity on the client. Anything
+// else (typically $RCAnonymousID:..., a purchase made before logIn took)
+// would fail the RPCs' uuid cast with a 500 on every retry, forever, since
+// RevenueCat resends the same payload (issue #6). Acknowledge it with 200
+// instead and log the whole event — it carries aliases/transaction_id —
+// so the purchase can be found and credited by hand.
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+function unlinkedAppUserIdResponse(event: Record<string, unknown>): Response {
+  console.error('Uncreditable app_user_id (not a Supabase user id), needs manual credit', event);
+  return new Response('Unlinked app_user_id', { status: 200 });
+}
+
 Deno.serve(async (req) => {
   if (req.method !== 'POST') {
     return new Response('Method not allowed', { status: 405 });
@@ -155,6 +169,7 @@ async function handleConsumableEvent(eventType: string, event: Record<string, un
     console.error('Creditable event missing required fields', event);
     return new Response('Malformed event', { status: 400 });
   }
+  if (!UUID_PATTERN.test(appUserId)) return unlinkedAppUserIdResponse(event);
 
   const amount = CREDIT_AMOUNTS_BY_PRODUCT_ID[productId];
   if (!amount) {
@@ -201,6 +216,7 @@ async function handleSubscriptionEvent(eventType: string, event: Record<string, 
     console.error('Subscription event missing app_user_id', event);
     return new Response('Malformed event', { status: 400 });
   }
+  if (!UUID_PATTERN.test(appUserId)) return unlinkedAppUserIdResponse(event);
 
   // The product the subscriber is on *after* this event. For every event
   // type except PRODUCT_CHANGE this is just event.product_id — but
