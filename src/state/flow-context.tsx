@@ -186,8 +186,9 @@ export function FlowProvider({ children }: { children: ReactNode }) {
   const [isRemoving, setIsRemoving] = useState(false);
   const [removalResult, setRemovalResult] = useState<RemovalResult | null>(null);
   // The uid that paid for this photo's removal, not just a boolean: the
-  // server's idempotency key is uid + request_id, so a different account
-  // re-running the same photo would be charged again.
+  // server's pre-render check (print_render_allowed) only lets a 0-balance
+  // re-run through for the same uid + request_id, so after an account
+  // switch the purchase redirect has to apply again.
   const [removalPaidBy, setRemovalPaidBy] = useState<string | null>(null);
 
   const [userId, setUserId] = useState<string | null>(null);
@@ -214,13 +215,11 @@ export function FlowProvider({ children }: { children: ReactNode }) {
   // Same idea, but scoped per-*photo* rather than per-attempt: generated
   // once when a photo is picked, then reused across every runRemoval() call
   // on that photo regardless of success or failure — never cleared on
-  // success like printRequestIdRef is. This is what will let the server
-  // charge runRemoval() exactly once per photo (unlimited free tap/rerun
-  // attempts) once leash-remover-api starts charging export=standard —
-  // the billing-v2 redesign's agreed charge point. Inert today: the server
-  // doesn't charge standard renders yet, so this just rides along unused
-  // until it does. Deliberately shipped ahead of that server change so the
-  // server-side flip doesn't also require a client release to land safely.
+  // success like printRequestIdRef is. This is what lets the server charge
+  // runRemoval() exactly once per photo (unlimited free tap/rerun attempts)
+  // — the billing-v2 redesign's agreed charge point, live server-side since
+  // 2026-09-06. It was shipped ahead of that flip so the server change
+  // didn't also need a client release to land safely.
   const standardRequestIdRef = useRef<string | null>(null);
 
   const fetchCredits = useCallback(async (uid: string) => {
