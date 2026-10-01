@@ -213,8 +213,8 @@ export default function ExportScreen() {
         </View>
 
         <View style={styles.footerActions}>
-          <Button title="Done" onPress={handleDone} />
-          <Button title="Start Over" variant="outline" onPress={() => router.replace('/correct')} />
+          <Button title="Done" variant="outline" onPress={handleDone} />
+          <Button title="Start Over" variant="secondary" onPress={() => router.replace('/correct')} />
         </View>
       </SafeAreaView>
     </ThemedView>
