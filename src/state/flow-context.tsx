@@ -108,6 +108,11 @@ type FlowState = {
   // whether it succeeded (F-10 on false); throws InsufficientCreditsError on
   // the server's 402, same split as runPrintRender below.
   runRemoval: () => Promise<boolean>;
+  // Whether the current photo's removal credit has already been spent by
+  // the signed-in user — every later runRemoval() on this photo reuses
+  // standardRequestIdRef, so the server won't charge it again. Drives
+  // correct.tsx's "1 credit" label and its 0-credit purchase redirect.
+  removalPaidForPhoto: boolean;
   // F-08: a fresh "print" resolution render, called only once a credit is
   // confirmed available. /v2/render (export=print) charges atomically
   // server-side — it either returns the image and charges once, or does
@@ -180,6 +185,10 @@ export function FlowProvider({ children }: { children: ReactNode }) {
 
   const [isRemoving, setIsRemoving] = useState(false);
   const [removalResult, setRemovalResult] = useState<RemovalResult | null>(null);
+  // The uid that paid for this photo's removal, not just a boolean: the
+  // server's idempotency key is uid + request_id, so a different account
+  // re-running the same photo would be charged again.
+  const [removalPaidBy, setRemovalPaidBy] = useState<string | null>(null);
 
   const [userId, setUserId] = useState<string | null>(null);
   const [isAnonymous, setIsAnonymous] = useState(true);
@@ -321,6 +330,7 @@ export function FlowProvider({ children }: { children: ReactNode }) {
   const pickPhoto = useCallback((uri: string, width: number, height: number) => {
     printRequestIdRef.current = null;
     standardRequestIdRef.current = null;
+    setRemovalPaidBy(null);
     setPhotoUri(uri);
     setPhotoWidth(width);
     setPhotoHeight(height);
@@ -444,7 +454,10 @@ export function FlowProvider({ children }: { children: ReactNode }) {
       // Same guard as runPrintRender: the server sends this as null, not an
       // omitted key, whenever nothing was charged. Only writes it when it's
       // an actual number so a null here can't be mistaken for "0 credits".
-      if (typeof result.credit_balance === 'number') setCredits(result.credit_balance);
+      if (typeof result.credit_balance === 'number') {
+        setCredits(result.credit_balance);
+        setRemovalPaidBy(userId);
+      }
       return true;
     } catch (error) {
       // Let the caller (processing.tsx) send the user to sign-in or the
@@ -459,7 +472,7 @@ export function FlowProvider({ children }: { children: ReactNode }) {
     } finally {
       setIsRemoving(false);
     }
-  }, [photoUri, photoWidth, photoHeight, tapPoints]);
+  }, [photoUri, photoWidth, photoHeight, tapPoints, userId]);
 
   const runPrintRender = useCallback(async (): Promise<RemovalResult | null> => {
     if (!photoUri) return null;
@@ -602,6 +615,7 @@ export function FlowProvider({ children }: { children: ReactNode }) {
   const resetFlow = useCallback(() => {
     printRequestIdRef.current = null;
     standardRequestIdRef.current = null;
+    setRemovalPaidBy(null);
     setPhotoUri(null);
     setPhotoWidth(0);
     setPhotoHeight(0);
@@ -634,6 +648,7 @@ export function FlowProvider({ children }: { children: ReactNode }) {
       isRemoving,
       removalResult,
       runRemoval,
+      removalPaidForPhoto: removalPaidBy !== null && removalPaidBy === userId,
       runPrintRender,
       userId,
       isSignedIn: userId !== null && !isAnonymous,
@@ -664,6 +679,7 @@ export function FlowProvider({ children }: { children: ReactNode }) {
       isRemoving,
       removalResult,
       runRemoval,
+      removalPaidBy,
       runPrintRender,
       userId,
       isAnonymous,

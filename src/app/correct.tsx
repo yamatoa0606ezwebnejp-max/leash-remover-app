@@ -69,6 +69,7 @@ export default function CorrectScreen() {
     continueAtNorm,
     isSignedIn,
     credits,
+    removalPaidForPhoto,
   } = useFlow();
 
   // Billing-v2 (2026-09-06): runRemoval() now charges a credit server-side,
@@ -81,7 +82,9 @@ export default function CorrectScreen() {
       router.push('/sign-in');
       return;
     }
-    if (credits <= 0) {
+    // A photo that's already been paid for re-runs free, so a balance that
+    // has since hit 0 mustn't block it.
+    if (credits <= 0 && !removalPaidForPhoto) {
       router.push('/purchase');
       return;
     }
@@ -159,10 +162,23 @@ export default function CorrectScreen() {
             {isPreviewLoading ? 'Checking…' : `${acceptedCount} point(s) marked for removal`}
           </ThemedText>
           <Button
-            title={isSignedIn ? 'Remove Leash' : 'Sign In to Remove the Leash'}
+            title={
+              !isSignedIn
+                ? 'Sign In to Remove the Leash'
+                : removalPaidForPhoto
+                  ? 'Remove Leash'
+                  : 'Remove Leash · 1 credit'
+            }
             disabled={!anyAccepted || isPreviewLoading}
             onPress={handleRemovePress}
           />
+          {isSignedIn && (
+            <ThemedText type="small" themeColor="textSecondary" style={styles.centerText}>
+              {removalPaidForPhoto
+                ? 'Already paid for this photo — re-runs are free'
+                : `${credits} ${credits === 1 ? 'credit' : 'credits'} left · re-runs on this photo are free`}
+            </ThemedText>
+          )}
         </View>
       </SafeAreaView>
     </ThemedView>

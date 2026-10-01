@@ -155,7 +155,6 @@ export default function ExportScreen() {
             </ThemedText>
             <Button
               title={isExportingStandard ? 'Saving…' : 'Export'}
-              variant="secondary"
               disabled={!removalResult || isExportingStandard}
               onPress={handleStandardExport}
             />
@@ -171,7 +170,7 @@ export default function ExportScreen() {
             <ThemedText type="small" themeColor="textSecondary">
               {isSignedIn
                 ? 'Paid credit · print-ready resolution'
-                : 'Sign in to claim your free credit and keep credits across reinstalls'}
+                : 'Sign in to claim your free credits and keep credits across reinstalls'}
             </ThemedText>
 
             <View style={styles.presetRow}>
@@ -206,7 +205,7 @@ export default function ExportScreen() {
               />
             ) : (
               <Button
-                title="Sign In to Get Your Free Credit"
+                title="Sign In to Get Your Free Credits"
                 onPress={() => router.push('/sign-in')}
               />
             )}
