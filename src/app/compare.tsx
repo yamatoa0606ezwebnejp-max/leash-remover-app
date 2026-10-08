@@ -10,7 +10,6 @@ import { ThemedView } from '@/components/themed-view';
 import { Button } from '@/components/ui/button';
 import { MaxContentWidth, Radius, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
-import { t } from '@/i18n';
 import { useFlow } from '@/state/flow-context';
 
 export default function CompareScreen() {
@@ -26,7 +25,7 @@ export default function CompareScreen() {
   return (
     <ThemedView style={styles.container}>
       <SafeAreaView style={styles.safeArea}>
-        <ScreenHeader title={t('compare.title')} onBack={() => router.back()} />
+        <ScreenHeader title="Before & After" onBack={() => router.back()} />
 
         <Pressable
           onPressIn={() => setShowOriginal(true)}
@@ -40,23 +39,23 @@ export default function CompareScreen() {
           )}
           <View style={[styles.badge, { backgroundColor: theme.primaryDark + 'CC' }]}>
             <ThemedText type="smallBold" style={{ color: theme.onPrimary }}>
-              {showOriginal ? t('compare.before') : t('compare.after')}
+              {showOriginal ? 'Before' : 'After'}
             </ThemedText>
           </View>
         </Pressable>
 
         <ThemedText type="small" themeColor="textSecondary" style={styles.centerText}>
-          {t('compare.holdHint')}
+          Press and hold to see the original
         </ThemedText>
 
         <View style={styles.footer}>
           <Button
-            title={t('common.startOver')}
+            title="Start Over"
             variant="outline"
             onPress={() => router.replace('/correct')}
             style={styles.footerButton}
           />
-          <Button title={t('common.next')} onPress={() => router.push('/export')} style={styles.footerButton} />
+          <Button title="Next" onPress={() => router.push('/export')} style={styles.footerButton} />
         </View>
       </SafeAreaView>
     </ThemedView>
