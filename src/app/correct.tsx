@@ -140,9 +140,13 @@ export default function CorrectScreen() {
               {REASON_HINTS[lastRejected.reason ?? 'no_mask']}
             </ThemedText>
           )}
-          {!coverageComplete && continueAtNorm.length > 0 && (
+          {/* A weak signal (docs/api.md: flags 14 of 20 test photos, 12 of
+              which render fine), so it must read as optional — worded as an
+              instruction, it kept users tapping instead of removing. */}
+          {!coverageComplete && continueAtNorm.length > 0 && !atMax && (
             <ThemedText type="small" themeColor="textSecondary" style={styles.centerText}>
-              The lead looks like it keeps going — tap to continue marking it.
+              If the leash continues past the dotted circle, tap it there too — otherwise you&apos;re
+              ready to remove it.
             </ThemedText>
           )}
           {dogDetected === false && (
